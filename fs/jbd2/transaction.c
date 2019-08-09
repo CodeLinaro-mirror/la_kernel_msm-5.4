@@ -1569,7 +1569,7 @@ int jbd2_journal_forget (handle_t *handle, struct buffer_head *bh)
 	if (!J_EXPECT_JH(jh, !jh->b_committed_data,
 			 "inconsistent data on disk")) {
 		err = -EIO;
-		goto not_jbd;
+		goto drop;
 	}
 
 	/* keep track of whether or not this transaction modified us */
@@ -1659,7 +1659,7 @@ int jbd2_journal_forget (handle_t *handle, struct buffer_head *bh)
 		if (!jh->b_cp_transaction) {
 			JBUFFER_TRACE(jh, "belongs to none transaction");
 			spin_unlock(&journal->j_list_lock);
-			goto not_jbd;
+			goto drop;
 		}
 
 		/*
@@ -1669,7 +1669,7 @@ int jbd2_journal_forget (handle_t *handle, struct buffer_head *bh)
 		if (!buffer_dirty(bh)) {
 			__jbd2_journal_remove_checkpoint(jh);
 			spin_unlock(&journal->j_list_lock);
-			goto not_jbd;
+			goto drop;
 		}
 
 		/*
@@ -1684,7 +1684,7 @@ int jbd2_journal_forget (handle_t *handle, struct buffer_head *bh)
 		__jbd2_journal_file_buffer(jh, transaction, BJ_Forget);
 		spin_unlock(&journal->j_list_lock);
 	}
-
+drop:
 	jbd_unlock_bh_state(bh);
 	__brelse(bh);
 	if (wait_for_writeback)
