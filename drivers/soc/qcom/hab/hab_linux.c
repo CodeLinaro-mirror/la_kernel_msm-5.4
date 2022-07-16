@@ -144,7 +144,8 @@ static long hab_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		}
 
 		ret = hab_vchan_recv(ctx, &msg, recv_param->vcid,
-				&recv_param->sizebytes, recv_param->flags);
+				&recv_param->sizebytes, recv_param->timeout,
+				recv_param->flags);
 
 		if (ret == 0 && msg) {
 			if (copy_to_user((void __user *)recv_param->data,
