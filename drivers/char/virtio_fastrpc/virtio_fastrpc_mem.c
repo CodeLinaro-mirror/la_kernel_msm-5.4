@@ -218,7 +218,8 @@ int fastrpc_mmap_remove(struct fastrpc_file *fl, uintptr_t va,
 	hlist_for_each_entry_safe(map, n, &fl->maps, hn) {
 		if (map->raddr == va &&
 			map->raddr + map->len == va + len &&
-			map->refs == 1) {
+			map->refs == 1 &&
+			!map->ctx_refs) {
 			match = map;
 			hlist_del_init(&map->hn);
 			break;
@@ -244,21 +245,30 @@ void fastrpc_mmap_free(struct fastrpc_file *fl,
 		dev_err(me->dev, "%s ADSP_MMAP_HEAP_ADDR is not supported\n",
 				__func__);
 	} else {
-		map->refs--;
-		if (!map->refs)
-			hlist_del_init(&map->hn);
-		if (map->refs > 0 && !flags)
+		if (map->refs <= 0 || map->ctx_refs < 0) {
+			dev_warn(me->dev, "%s map refs = %d or ctx_refs = %d is abnormal\n",
+					__func__, map->refs, map->ctx_refs);
 			return;
+		}
+		map->refs--;
+		if ((map->refs || map->ctx_refs) && flags) {
+			dev_warn(me->dev, "force free map, but refs = %d ctx_refs = %d\n",
+					map->refs + 1, map->ctx_refs);
+			map->refs = 0;
+			map->ctx_refs = 0;
+		}
+		if (!map->refs && !map->ctx_refs) {
+			hlist_del_init(&map->hn);
+			if (!IS_ERR_OR_NULL(map->table))
+			dma_buf_unmap_attachment(map->attach, map->table,
+					DMA_BIDIRECTIONAL);
+			if (!IS_ERR_OR_NULL(map->attach))
+				dma_buf_detach(map->buf, map->attach);
+			if (!IS_ERR_OR_NULL(map->buf))
+				dma_buf_put(map->buf);
+			kfree(map);
+		}
 	}
-	if (!IS_ERR_OR_NULL(map->table))
-		dma_buf_unmap_attachment(map->attach, map->table,
-				DMA_BIDIRECTIONAL);
-	if (!IS_ERR_OR_NULL(map->attach))
-		dma_buf_detach(map->buf, map->attach);
-	if (!IS_ERR_OR_NULL(map->buf))
-		dma_buf_put(map->buf);
-
-	kfree(map);
 }
 
 int fastrpc_mmap_find(struct fastrpc_file *fl, int fd,
@@ -318,6 +328,7 @@ int fastrpc_mmap_create(struct fastrpc_file *fl, int fd,
 	map->refs = 1;
 	map->fl = fl;
 	map->fd = fd;
+	map->ctx_refs = 0;
 	if (mflags == ADSP_MMAP_HEAP_ADDR ||
 			mflags == ADSP_MMAP_REMOTE_HEAP_ADDR) {
 		dev_err(me->dev, "%s ADSP_MMAP_HEAP_ADDR is not supported\n",

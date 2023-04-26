@@ -24,6 +24,7 @@ struct fastrpc_mmap {
 	size_t len;
 	uintptr_t raddr;
 	int refs;
+	int ctx_refs; /* Indicates reference count for context map */
 };
 
 struct fastrpc_buf {
