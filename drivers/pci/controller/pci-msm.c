@@ -104,6 +104,7 @@
 #define PCIE20_PARF_BDF_TRANSLATE_CFG	(0x24C)
 #define PCIE20_PARF_SID_OFFSET	(0x234)
 #define PCIE20_PARF_BDF_TRANSLATE_N (0x250)
+#define PCIE20_PARF_SLV_ADDR_MSB_CTRL	(0x2C0)
 
 #define PCIE20_ELBI_SYS_CTRL (0x04)
 #define PCIE20_ELBI_SYS_STTS (0x08)
@@ -817,6 +818,7 @@ struct msm_pcie_dev_t {
 	bool common_clk_en;
 	bool clk_power_manage_en;
 	bool aux_clk_sync;
+	bool pcie_slv_msb_bit;
 	bool aer_enable;
 	uint32_t smmu_sid_base;
 	uint32_t link_check_max_count;
@@ -3780,7 +3782,7 @@ static int msm_pcie_get_clk(struct msm_pcie_dev_t *pcie_dev)
 {
 	int i, cnt, ret;
 	struct msm_pcie_clk_info_t *clk_info;
-	u32 *clkfreq = NULL;
+	u32 *clkfreq = NULL, *clk_suppressible = NULL;
 	struct platform_device *pdev = pcie_dev->pdev;
 	char ref_clk_src[MAX_PROP_SIZE];
 
@@ -3826,6 +3828,42 @@ static int msm_pcie_get_clk(struct msm_pcie_dev_t *pcie_dev)
 
 			if (!strcmp(clk_info->name, "pcie_phy_refgen_clk"))
 				pcie_dev->rate_change_clk = clk_info;
+		}
+	}
+
+	ret = of_property_count_elems_of_size(pdev->dev.of_node,
+					      "clock-suppressible",
+					      sizeof(*clk_suppressible));
+	if ((ret < 0) || (ret != MSM_PCIE_MAX_CLK)) {
+		PCIE_DBG(pcie_dev,
+			 "PCIe: RC%d: mismatch between number of clock and suppressible entries: %d != %d\n",
+			 pcie_dev->rc_idx, MSM_PCIE_MAX_CLK, ret);
+	} else {
+
+		/* get clock suppressible info */
+		clk_suppressible = devm_kcalloc(&pdev->dev, MSM_PCIE_MAX_CLK,
+					sizeof(*clk_suppressible), GFP_KERNEL);
+		if (!clk_suppressible)
+			return -ENOMEM;
+
+		ret = of_property_read_u32_array(pdev->dev.of_node,
+					 "clock-suppressible",
+					 clk_suppressible, MSM_PCIE_MAX_CLK);
+		if (ret) {
+			PCIE_ERR(pcie_dev,
+			 "PCIe: RC%d: failed to get clock suppressible info: ret: %d\n",
+								 pcie_dev->rc_idx, ret);
+			return -EIO;
+		}
+
+		for (i = 0; i < MSM_PCIE_MAX_CLK; i++) {
+			clk_info = &pcie_dev->clk[i];
+			clk_info->suppressible = *clk_suppressible++;
+
+			PCIE_DBG(pcie_dev,
+			 "PCIe: RC%d: %s: suppressible: %d\n",
+			 pcie_dev->rc_idx, clk_info->name,
+					clk_info->suppressible);
 		}
 	}
 
@@ -4726,6 +4764,10 @@ static int msm_pcie_enable(struct msm_pcie_dev_t *dev)
 	/* init tcsr */
 	if (dev->tcsr_config)
 		pcie_tcsr_init(dev);
+
+	/* Enable Slave address input MSB bit to Constant 0 */
+	if (dev->pcie_slv_msb_bit)
+		msm_pcie_write_reg(dev->parf, PCIE20_PARF_SLV_ADDR_MSB_CTRL, 0x2);
 
 	/* init PCIe PHY */
 	ret = pcie_phy_init(dev);
@@ -6035,6 +6077,12 @@ static int msm_pcie_setup_drv(struct msm_pcie_dev_t *pcie_dev,
 
 	msm_pcie_setup_drv_msg(&drv_info->drv_enable, drv_info->dev_id,
 				MSM_PCIE_DRV_CMD_ENABLE);
+	if (pcie_dev->gdsc_clk_drv_ss_nonvotable) {
+		drv_info->drv_enable.pkt.dword[2] =
+					drv_info->l1ss_timeout_us / 1000;
+		PCIE_DBG(pcie_dev, "PCIe: RC%d: DRV L1ss timeout set to: %dus\n",
+			pcie_dev->rc_idx, drv_info->drv_enable.pkt.dword[2]);
+	}
 
 	msm_pcie_setup_drv_msg(&drv_info->drv_disable, drv_info->dev_id,
 				MSM_PCIE_DRV_CMD_DISABLE);
@@ -6212,6 +6260,10 @@ static int msm_pcie_probe(struct platform_device *pdev)
 	PCIE_DBG(pcie_dev, "AUX clock is %s synchronous to Core clock.\n",
 		pcie_dev->aux_clk_sync ? "" : "not");
 
+	pcie_dev->pcie_slv_msb_bit = of_property_read_bool(of_node,
+			"qcom,pcie-slv-msb-bit");
+	PCIE_DBG(pcie_dev, "PCIe Slave address MSB control bit is %s set\n",
+			pcie_dev->pcie_slv_msb_bit ? "" : "not");
 	of_property_read_u32(of_node, "qcom,smmu-sid-base",
 				&pcie_dev->smmu_sid_base);
 	PCIE_DBG(pcie_dev, "RC%d: qcom,smmu-sid-base: 0x%x.\n",
