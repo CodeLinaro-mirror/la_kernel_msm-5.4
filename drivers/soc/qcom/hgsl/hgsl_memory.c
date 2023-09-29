@@ -119,8 +119,10 @@ static int hgsl_mem_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 	int ret;
 
 	if ((vma == NULL) ||
-		(mem_node->flags & GSL_MEMFLAGS_PROTECTED))
+		(mem_node->flags & GSL_MEMFLAGS_PROTECTED)) {
+		LOGE("invalid argument");
 		return -EINVAL;
+        }
 
 	page_count = vma_pages(vma);
 	addr = vma->vm_start;
@@ -185,11 +187,13 @@ static int hgsl_lock_pages(struct hgsl_mem_node *mem_node)
        int src_vmid = VMID_HLOS;
        int dest_vmid = VMID_CP_PIXEL;
        int dest_perms = PERM_READ | PERM_WRITE;
-       int ret;
-       int i;
+       int ret = 0;
+       int i = 0;
 
-       if (IS_ERR(sgt))
+       if (IS_ERR(sgt)) {
+              LOGE("Invalid sgt in lock_pages");
               return PTR_ERR(sgt);
+       }
 
        ret = hyp_assign_table(sgt, &src_vmid, 1, &dest_vmid, &dest_perms, 1);
        if (ret) {
@@ -201,7 +205,7 @@ static int hgsl_lock_pages(struct hgsl_mem_node *mem_node)
        for_each_sg(sgt->sgl, sg, sgt->nents, i)
               SetPagePrivate(sg_page(sg));
 
-       return 0;
+       return ret;
 }
 
 static int hgsl_unlock_pages(struct hgsl_mem_node *mem_node)
@@ -211,15 +215,18 @@ static int hgsl_unlock_pages(struct hgsl_mem_node *mem_node)
        int src_vmid = VMID_CP_PIXEL;
        int dest_vmid = VMID_HLOS;
        int dest_perms = PERM_READ | PERM_WRITE | PERM_EXEC;
-       int ret;
-       int i;
+       int ret = 0;
+       int i = 0;
 
-       if (!sgt)
+       if (!sgt) {
+              LOGE("Invalid sgt in lock_pages");
               return -EINVAL;
-
+       }
        ret = hyp_assign_table(sgt, &src_vmid, 1, &dest_vmid, &dest_perms, 1);
-       if (ret)
+       if (ret) {
+              LOGE("Failed to assign sgt %d", ret);
               goto out;
+       }
 
        for_each_sg(sgt->sgl, sg, sgt->nents, i)
               ClearPagePrivate(sg_page(sg));
@@ -263,8 +270,10 @@ static void *hgsl_mem_dma_buf_vmap(struct dma_buf *dmabuf)
 {
 	struct hgsl_mem_node *mem_node = dmabuf->priv;
 
-      if (mem_node->flags & GSL_MEMFLAGS_PROTECTED)
+      if (mem_node->flags & GSL_MEMFLAGS_PROTECTED) {
+		 LOGE("invalid arguments mem_node->flags is PROTECTED");
                  return ERR_PTR(-EINVAL);
+      }
 
 	mutex_lock(&hgsl_map_global_lock);
 	if (IS_ERR_OR_NULL(mem_node->vmapping))
@@ -432,11 +441,15 @@ int hgsl_mem_cache_op(struct device *dev, struct hgsl_mem_node *mem_node,
 	struct sg_table *sgt = NULL;
 	struct scatterlist *s = NULL;
 
-	if (!dev || !mem_node)
+	if (!dev || !mem_node) {
+		LOGE("invalid arguments dev=%p, mem_node=%p", dev, mem_node);
 		return -EINVAL;
+        }
 
-	 if (mem_node->flags & GSL_MEMFLAGS_PROTECTED)
+	if (mem_node->flags & GSL_MEMFLAGS_PROTECTED) {
+		LOGE("invalid arguments. mem_node->flags is PROTECTED");
                 return -EINVAL;
+        }
 
 	cache_mode = mem_node->flags & GSL_MEMFLAGS_CACHEMODE_MASK;
 	switch (cache_mode) {
@@ -579,8 +592,10 @@ int hgsl_sharedmem_alloc(struct device *dev, uint32_t sizebytes,
 	mem_node->memtype = GSL_USER_MEM_TYPE_ASHMEM;
 	mem_node->memdesc.size = requested_size;
 
-	if (requested_pcount != 0)
+	if (requested_pcount != 0) {
+		LOGE("requested_pcount is still non-zero!!!!");
 		return -ENOMEM;
+        }
 
 	if (flags & GSL_MEMFLAGS_PROTECTED) {
 		ret = hgsl_lock_pages(mem_node);
