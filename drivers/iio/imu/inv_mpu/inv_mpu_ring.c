@@ -303,6 +303,7 @@ void inv_convert_and_push_8bytes(struct inv_mpu_state *st, u16 hdr,
 static void store_acc_boot_sample(struct inv_mpu_state *st, u64 t,
 						s16 x, s16 y, s16 z)
 {
+	struct iio_dev *indio_dev = iio_priv_to_dev(st);
 	if (false == st->acc_buffer_inv_samples)
 		return;
 
@@ -324,6 +325,13 @@ static void store_acc_boot_sample(struct inv_mpu_state *st, u64 t,
 		dev_info(st->dev, "End of ACC buffering %d\n",
 					st->acc_bufsample_cnt);
 		st->acc_buffer_inv_samples = false;
+		/**Disable the ACCEL if not enabled at end of buffer**/
+		if (st->accel_enable != 1) {
+			st->sensor_l[SENSOR_L_ACCEL].on = false;
+			st->trigger_state = RATE_TRIGGER;
+			inv_check_sensor_on(st);
+			set_inv_enable(indio_dev);
+		}
 	}
 	mutex_unlock(&st->acc_sensor_buff);
 }
@@ -331,6 +339,7 @@ static void store_acc_boot_sample(struct inv_mpu_state *st, u64 t,
 static void store_gyro_boot_sample(struct inv_mpu_state *st, u64 t,
 						s16 x, s16 y, s16 z)
 {
+	struct iio_dev *indio_dev = iio_priv_to_dev(st);
 	if (false == st->gyro_buffer_inv_samples)
 		return;
 	mutex_lock(&st->gyro_sensor_buff);
@@ -354,6 +363,13 @@ static void store_gyro_boot_sample(struct inv_mpu_state *st, u64 t,
 		dev_info(st->dev, "End of GYRO buffering %d\n",
 					st->gyro_bufsample_cnt);
 		st->gyro_buffer_inv_samples = false;
+		/**Disable the GYRO if not enabled at end of buffer**/
+		if (st->gyro_enable != 1) {
+			st->sensor_l[SENSOR_L_GYRO].on = false;
+			st->trigger_state = RATE_TRIGGER;
+			inv_check_sensor_on(st);
+			set_inv_enable(indio_dev);
+		}
 	}
 	mutex_unlock(&st->gyro_sensor_buff);
 }
