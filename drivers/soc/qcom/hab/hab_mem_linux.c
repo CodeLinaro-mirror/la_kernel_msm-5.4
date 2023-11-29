@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include "hab.h"
 #include <linux/fdtable.h>
@@ -422,6 +423,8 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 		ret = -ENOMEM;
 		goto err_add_exp;
 	}
+	exp = &exp_super->exp;
+	exp->payload_count = page_count;
 	platform_data = kzalloc(
 			sizeof(struct exp_platform_data),
 			GFP_KERNEL);
@@ -430,8 +433,6 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 		goto err_alloc;
 	}
 
-	exp = &exp_super->exp;
-	exp->payload_count = page_count;
 	platform_data->dmabuf = buf;
 	exp_super->offset = offset;
 	exp_super->platform_data = (void *)platform_data;
@@ -451,9 +452,9 @@ static int habmem_add_export_compress(struct virtual_channel *vchan,
 err_compress_pfns:
 	kfree(platform_data);
 err_alloc:
-	spin_lock(&exp->pchan->expid_lock);
-	idr_remove(&exp->pchan->expid_idr, exp->export_id);
-	spin_unlock(&exp->pchan->expid_lock);
+	spin_lock(&vchan->pchan->expid_lock);
+	idr_remove(&vchan->pchan->expid_idr, exp->export_id);
+	spin_unlock(&vchan->pchan->expid_lock);
 	vfree(exp_super);
 err_add_exp:
 	dma_buf_put((struct dma_buf *)buf);
