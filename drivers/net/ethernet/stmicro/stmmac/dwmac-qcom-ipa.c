@@ -100,6 +100,7 @@ static void eth_ipa_ctx_init(void)
 
 	eth_ipa_ctx.ipa_offload_susp[IPA_QUEUE_BE] = false;
 	eth_ipa_ctx.ipa_offload_susp[IPA_QUEUE_CV2X] = false;
+	eth_ipa_ctx.ipa_offload_link_down = true;
 
 	/* set desc count for BE queues */
 	if (eth_ipa_ctx.queue_enabled[IPA_QUEUE_BE]) {
