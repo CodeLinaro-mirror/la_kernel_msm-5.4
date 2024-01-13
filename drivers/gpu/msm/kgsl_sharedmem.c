@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2002,2007-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <asm/cacheflush.h>
@@ -948,6 +949,9 @@ static void kgsl_contiguous_free(struct kgsl_memdesc *memdesc)
 	if (!memdesc->hostptr)
 		return;
 
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.coherent);
 
 #ifdef CONFIG_MM_STAT_UNRECLAIMABLE_PAGES
@@ -963,8 +967,17 @@ static void kgsl_free_secure_system_pages(struct kgsl_memdesc *memdesc)
 {
 	int i;
 	struct scatterlist *sg;
+<<<<<<< HEAD   (2fc711 soc: qcom: hgsl: fix potential use after free)
 	int ret = unlock_sgt(memdesc->sgt);
+=======
+	int ret;
+>>>>>>> CHANGE (c6a4a9 msm: kgsl: Do not free sharedmem if it cannot be unmapped)
 	int order = get_order(PAGE_SIZE);
+
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
+	ret = kgsl_unlock_sgt(memdesc->sgt);
 
 	if (ret) {
 		/*
@@ -998,7 +1011,16 @@ static void kgsl_free_secure_system_pages(struct kgsl_memdesc *memdesc)
 
 static void kgsl_free_secure_pool_pages(struct kgsl_memdesc *memdesc)
 {
+<<<<<<< HEAD   (2fc711 soc: qcom: hgsl: fix potential use after free)
 	int ret = unlock_sgt(memdesc->sgt);
+=======
+	int ret;
+
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
+	ret = kgsl_unlock_sgt(memdesc->sgt);
+>>>>>>> CHANGE (c6a4a9 msm: kgsl: Do not free sharedmem if it cannot be unmapped)
 
 	if (ret) {
 		/*
@@ -1028,6 +1050,9 @@ static void kgsl_free_pool_pages(struct kgsl_memdesc *memdesc)
 	kgsl_paged_unmap_kernel(memdesc);
 	WARN_ON(memdesc->hostptr);
 
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.page_alloc);
 
 	kgsl_pool_free_pages(memdesc->pages, memdesc->page_count);
@@ -1044,6 +1069,9 @@ static void kgsl_free_system_pages(struct kgsl_memdesc *memdesc)
 
 	kgsl_paged_unmap_kernel(memdesc);
 	WARN_ON(memdesc->hostptr);
+
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
 
 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.page_alloc);
 
