@@ -3,7 +3,7 @@
  * drivers/mmc/host/sdhci-msm.c - Qualcomm SDHCI Platform driver
  *
  * Copyright (c) 2013-2014,2020. The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -2299,10 +2299,11 @@ static int sdhci_msm_vreg_init(struct device *dev,
 		ret = sdhci_msm_vreg_init_reg(dev, curr_vdd_io_reg);
 		if (ret)
 			goto out;
+
 		/* In eMMC case vdd-io might be a fixed 1.8V regulator */
-		if (mmc->caps & MMC_CAP_NONREMOVABLE &&
-			!regulator_is_supported_voltage(curr_vdd_io_reg->reg,
-				2700000, 3600000))
+		if ((mmc->caps & MMC_CAP_NONREMOVABLE)
+			&& (mmc->caps2 & MMC_CAP2_NO_SD)
+			&& (mmc->caps2 & MMC_CAP2_NO_SDIO))
 			host->flags &= ~SDHCI_SIGNALING_330;
 	}
 out:
