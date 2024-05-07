@@ -198,6 +198,7 @@ static int usb_extcon_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, info);
 	device_set_wakeup_capable(&pdev->dev, true);
+	device_set_wakeup_enable(&pdev->dev, true);
 
 	/* Perform initial detection */
 	usb_extcon_detect_cable(&info->wq_detcable.work);
@@ -236,6 +237,7 @@ static int usb_extcon_suspend(struct device *dev)
 				return ret;
 			}
 		}
+		goto wakeup_cap;
 	}
 
 	/*
@@ -248,6 +250,7 @@ static int usb_extcon_suspend(struct device *dev)
 	if (info->vbus_gpiod)
 		disable_irq(info->vbus_irq);
 
+wakeup_cap:
 	if (!device_may_wakeup(dev))
 		pinctrl_pm_select_sleep_state(dev);
 
@@ -277,13 +280,14 @@ static int usb_extcon_resume(struct device *dev)
 				return ret;
 			}
 		}
+		goto wakeup_cap;
 	}
 
 	if (info->id_gpiod)
 		enable_irq(info->id_irq);
 	if (info->vbus_gpiod)
 		enable_irq(info->vbus_irq);
-
+wakeup_cap:
 	queue_delayed_work(system_power_efficient_wq,
 			   &info->wq_detcable, 0);
 
