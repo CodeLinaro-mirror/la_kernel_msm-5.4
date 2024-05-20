@@ -817,7 +817,6 @@ static void smi230_gyro_fifo_handle(
 		return;
 	}
 
-	extract_length = SMI230_MAX_GYRO_FIFO_FRAME;
 	err = smi230_gyro_extract_fifo(fifo_gyro_data,
                             &fifo_frames,
                             &fifo,
