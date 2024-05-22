@@ -1847,6 +1847,21 @@ static int hgsl_ioctl_mem_alloc(struct file *filep, unsigned long arg)
 		LOGE("dma_buf_fd failed, size 0x%x", mem_node->memdesc.size);
 		ret = -EINVAL;
 		goto out;
+	params.fd = mem_node->fd;
+	if (!ret) {
+		if (copy_to_user(USRPTR(arg), &params, sizeof(params))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		if (copy_to_user(USRPTR(params.memdesc),
+			&mem_node->memdesc, sizeof(mem_node->memdesc))) {
+			ret = -EFAULT;
+			goto out;
+		}
+		mutex_lock(&priv->lock);
+		list_add(&mem_node->node, &priv->mem_allocated);
+		hgsl_trace_gpu_mem_total(priv, mem_node->memdesc.size64);
+		mutex_unlock(&priv->lock);
 	}
 	get_dma_buf(mem_node->dma_buf);
 
@@ -2032,9 +2047,8 @@ static int hgsl_ioctl_mem_map_smmu(struct file *filep, unsigned long arg)
 		}
 		mutex_lock(&priv->lock);
 		list_add(&mem_node->node, &priv->mem_mapped);
-		mutex_unlock(&priv->lock);
-
 		hgsl_trace_gpu_mem_total(priv, mem_node->memdesc.size64);
+		mutex_unlock(&priv->lock);
 	}
 
 out:
