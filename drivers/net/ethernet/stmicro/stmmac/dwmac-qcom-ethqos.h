@@ -20,6 +20,7 @@ extern void *ipc_emac_log_ctxt;
 #include <net/addrconf.h>
 #include <net/ipv6.h>
 #include <net/inet_common.h>
+#include <linux/interconnect.h>
 
 #include <linux/uaccess.h>
 #include <linux/time64.h>
@@ -881,6 +882,89 @@ struct ethqos_io_macro {
 	u32 rgmii_tx_drv;
 };
 
+struct emac_icc_data {
+	const char *name;
+	u32 average_bandwidth;
+	u32 peak_bandwidth;
+};
+
+static struct emac_icc_data emac_axi_icc_data[] = {
+	{
+		.name = "SPEED_0Mbps",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 0,
+	},
+	{
+		.name = "SPEED_10Mbps",
+		.average_bandwidth = 2500,
+		.peak_bandwidth = 2500,
+	},
+	{
+		.name = "SPEED_100Mbps",
+		.average_bandwidth = 25000,
+		.peak_bandwidth = 25000,
+	},
+	{
+		.name = "SPEED_1Gbps",
+		.average_bandwidth = 250000,
+		.peak_bandwidth = 250000,
+	},
+	{
+		.name = "SPEED_2.5Gbps",
+		.average_bandwidth = 625000,
+		.peak_bandwidth = 625000,
+	},
+	{
+		.name = "SPEED_5Gbps",
+		.average_bandwidth = 825000,
+		.peak_bandwidth = 825000,
+	},
+	{
+		.name = "SPEED_10Gbps",
+		.average_bandwidth = 1100000,
+		.peak_bandwidth = 1100000,
+	},
+};
+
+static struct emac_icc_data emac_apb_icc_data[] = {
+	{
+		.name = "SPEED_0Mbps",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 0,
+	},
+	{
+		.name = "SPEED_10Mbps",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 2500,
+	},
+	{
+		.name = "SPEED_100Mbps",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 25000,
+	},
+	{
+		.name = "SPEED_1Gbps",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 250000,
+	},
+	{
+		.name = "SPEED_2.5Gbps",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 625000,
+	},
+	{
+		.name = "SPEED_5Gbps",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 825000,
+	},
+	{
+		.name = "SPEED_10Gbps",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 1100000,
+	},
+};
+
+
 struct qcom_ethqos {
 	struct platform_device *pdev;
 	void __iomem *rgmii_base;
@@ -1008,6 +1092,11 @@ struct qcom_ethqos {
 	unsigned long action;
 	bool driver_load_fail;
 	bool skip_ipa_autoresume;
+	struct icc_path *axi_icc_path;
+	struct emac_icc_data *emac_axi_icc;
+	struct icc_path *apb_icc_path;
+	struct emac_icc_data *emac_apb_icc;
+
 };
 
 struct pps_cfg {
