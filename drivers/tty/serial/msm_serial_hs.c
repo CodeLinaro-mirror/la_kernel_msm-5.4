@@ -197,7 +197,6 @@ struct msm_hs_wakeup {
 	bool inject_rx;
 	unsigned char rx_to_inject;
 	bool enabled;
-	bool freed;
 };
 
 struct msm_hs_port {
@@ -699,6 +698,9 @@ static int msm_hs_remove(struct platform_device *pdev)
 	msm_uport = get_matching_hs_port(pdev);
 	if (!msm_uport)
 		return -EINVAL;
+
+	if (is_use_low_power_wakeup(msm_uport))
+		free_irq(msm_uport->wakeup.irq, msm_uport);
 
 	del_timer_sync(&msm_uport->tx.tx_timeout_timer);
 	dev = msm_uport->uport.dev;
@@ -2234,8 +2236,6 @@ void enable_wakeup_interrupt(struct msm_hs_port *msm_uport)
 
 	if (!is_use_low_power_wakeup(msm_uport))
 		return;
-	if (msm_uport->wakeup.freed)
-		return;
 
 	if (!(msm_uport->wakeup.enabled)) {
 		spin_lock_irqsave(&uport->lock, flags);
@@ -2244,6 +2244,7 @@ void enable_wakeup_interrupt(struct msm_hs_port *msm_uport)
 		spin_unlock_irqrestore(&uport->lock, flags);
 		disable_irq(uport->irq);
 		enable_irq(msm_uport->wakeup.irq);
+		irq_set_irq_wake(msm_uport->wakeup.irq, 1);
 	} else {
 		MSM_HS_WARN("%s():Wake up IRQ already enabled\n", __func__);
 	}
@@ -2256,10 +2257,9 @@ void disable_wakeup_interrupt(struct msm_hs_port *msm_uport)
 
 	if (!is_use_low_power_wakeup(msm_uport))
 		return;
-	if (msm_uport->wakeup.freed)
-		return;
 
 	if (msm_uport->wakeup.enabled) {
+		irq_set_irq_wake(msm_uport->wakeup.irq, 0);
 		disable_irq_nosync(msm_uport->wakeup.irq);
 		enable_irq(uport->irq);
 		spin_lock_irqsave(&uport->lock, flags);
@@ -3449,7 +3449,6 @@ static int msm_hs_probe(struct platform_device *pdev)
 			pdata->bam_tx_ep_pipe_index;
 	msm_uport->bam_rx_ep_pipe_index =
 			pdata->bam_rx_ep_pipe_index;
-	msm_uport->wakeup.enabled = false;
 
 	uport->iotype = UPIO_MEM;
 	uport->fifosize = 64;
@@ -3558,6 +3557,7 @@ static int msm_hs_probe(struct platform_device *pdev)
 	}
 
 	if (is_use_low_power_wakeup(msm_uport)) {
+		irq_set_status_flags(msm_uport->wakeup.irq, IRQ_NOAUTOEN);
 		ret = request_threaded_irq(msm_uport->wakeup.irq, NULL,
 				msm_hs_wakeup_isr,
 				IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
@@ -3567,10 +3567,7 @@ static int msm_hs_probe(struct platform_device *pdev)
 					__func__, ret);
 			goto err_clock;
 		}
-		msm_uport->wakeup.freed = false;
-		disable_irq(msm_uport->wakeup.irq);
 		msm_uport->wakeup.enabled = false;
-		irq_set_irq_wake(msm_uport->wakeup.irq, 1);
 	}
 	msm_serial_debugfs_init(msm_uport, pdev->id);
 	msm_hs_unconfig_uart_gpios(uport);
@@ -3649,9 +3646,6 @@ static void msm_hs_shutdown(struct uart_port *uport)
 	int data;
 	unsigned long flags;
 
-	if (is_use_low_power_wakeup(msm_uport))
-		irq_set_irq_wake(msm_uport->wakeup.irq, 0);
-
 	if (msm_uport->wakeup.enabled)
 		disable_irq(msm_uport->wakeup.irq);
 	else
@@ -3664,11 +3658,6 @@ static void msm_hs_shutdown(struct uart_port *uport)
 
 	/* Free the interrupt */
 	free_irq(uport->irq, msm_uport);
-	if (is_use_low_power_wakeup(msm_uport)) {
-		free_irq(msm_uport->wakeup.irq, msm_uport);
-		MSM_HS_DBG("%s(): wakeup irq freed\n", __func__);
-	}
-	msm_uport->wakeup.freed = true;
 
 	/* make sure tx lh finishes */
 	kthread_flush_worker(&msm_uport->tx.kworker);
