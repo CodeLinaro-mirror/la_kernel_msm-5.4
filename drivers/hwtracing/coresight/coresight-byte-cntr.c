@@ -848,9 +848,11 @@ struct byte_cntr *byte_cntr_init(struct amba_device *adev,
 {
 	struct device *dev = &adev->dev;
 	struct device_node *np = adev->dev.of_node;
+	struct device_node *pcie_ep_node;
 	int byte_cntr_irq;
 	int ret;
 	struct byte_cntr *byte_cntr_data;
+	const char *pcie_ep_node_status;
 
 	byte_cntr_irq = of_irq_get_byname(np, "byte-cntr-irq");
 	if (byte_cntr_irq < 0)
@@ -891,7 +893,15 @@ struct byte_cntr *byte_cntr_init(struct amba_device *adev,
 	init_waitqueue_head(&byte_cntr_data->wq);
 	mutex_init(&byte_cntr_data->byte_cntr_lock);
 
-	etr_pcie_init(byte_cntr_data);
+	pcie_ep_node = of_find_compatible_node(NULL, NULL, "qcom,pcie-ep");
+	if(pcie_ep_node) {
+		if(!of_property_read_string(pcie_ep_node, "status", &pcie_ep_node_status)) {
+			if(!strcmp(pcie_ep_node_status, "okay") || !strcmp(pcie_ep_node_status, "ok")) {
+				etr_pcie_init(byte_cntr_data);
+			}
+		}
+	}
+
 	return byte_cntr_data;
 }
 EXPORT_SYMBOL(byte_cntr_init);
