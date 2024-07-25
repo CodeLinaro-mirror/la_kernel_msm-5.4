@@ -929,6 +929,7 @@ static void
 ethqos_update_rgmii_clk_and_bus_cfg(struct qcom_ethqos *ethqos,
 				    unsigned int speed)
 {
+	int ret;
 	switch (speed) {
 	case SPEED_1000:
 		ethqos->rgmii_clk_rate =  RGMII_1000_NOM_CLK_FREQ;
@@ -959,6 +960,27 @@ ethqos_update_rgmii_clk_and_bus_cfg(struct qcom_ethqos *ethqos,
 		break;
 	}
 	clk_set_rate(ethqos->rgmii_clk, ethqos->rgmii_clk_rate);
+
+	if (ethqos->axi_icc_path && ethqos->emac_axi_icc) {
+		ret = icc_set_bw(ethqos->axi_icc_path,
+				 ethqos->emac_axi_icc[ethqos->vote_idx].average_bandwidth,
+				 ethqos->emac_axi_icc[ethqos->vote_idx].peak_bandwidth);
+
+		ETHQOSDBG("Interconnect set BW	for Emac->Axi path = %d",ethqos->emac_axi_icc[ethqos->vote_idx].peak_bandwidth );
+		if (ret)
+			ETHQOSERR("Interconnect set BW failed for Emac->Axi path\n");
+	}
+
+	if (ethqos->apb_icc_path && ethqos->emac_apb_icc) {
+		ret = icc_set_bw(ethqos->apb_icc_path,
+				 ethqos->emac_apb_icc[ethqos->vote_idx].average_bandwidth,
+				 ethqos->emac_apb_icc[ethqos->vote_idx].peak_bandwidth);
+
+		ETHQOSDBG("Interconnect set BW	for Emac->ahb path = %d",ethqos->emac_apb_icc[ethqos->vote_idx].peak_bandwidth );
+		if (ret)
+			ETHQOSERR("Interconnect set BW failed for Emac->Apb path\n");
+	}
+
 }
 
 static void ethqos_set_func_clk_en(struct qcom_ethqos *ethqos)
@@ -4703,6 +4725,22 @@ static int _qcom_ethqos_probe(void *arg)
 		ethqos_update_rgmii_tx_drv_strength(ethqos);
 	ethqos_update_mdio_drv_strength(ethqos, np);
 	ethqos_mac_rec_init(ethqos);
+
+	ethqos->axi_icc_path = of_icc_get(&pdev->dev, "axi_icc_path");
+	if (!ethqos->axi_icc_path || IS_ERR(ethqos->axi_icc_path)) {
+		ETHQOSERR("Interconnect not found for Emac->Axi path\n");
+		ethqos->emac_axi_icc = NULL;
+	} else {
+		ethqos->emac_axi_icc = emac_axi_icc_data;
+	}
+
+	ethqos->apb_icc_path = of_icc_get(&pdev->dev, "apb_icc_path");
+	if (!ethqos->apb_icc_path || IS_ERR(ethqos->apb_icc_path)) {
+		ETHQOSERR("Interconnect not found for Emac->Apb path\n");
+		ethqos->emac_apb_icc = NULL;
+	} else {
+		ethqos->emac_apb_icc = emac_apb_icc_data;
+	}
 
 	ret = stmmac_dvr_probe(&pdev->dev, plat_dat, &stmmac_res);
 	if (ret)
