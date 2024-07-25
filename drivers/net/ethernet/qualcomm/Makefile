@@ -9,6 +9,6 @@ qcaspi-objs := qca_7k.o qca_debug.o qca_spi.o
 obj-$(CONFIG_QCA7000_UART) += qcauart.o
 qcauart-objs := qca_uart.o
 
-obj-y += emac/
+obj-$(CONFIG_QCOM_EMAC) += emac/
 
 obj-$(CONFIG_RMNET) += rmnet/
