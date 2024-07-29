@@ -128,6 +128,7 @@ static bool minidump_ftrace_in_oops;
 static bool minidump_ftrace_dump = true;
 #else
 enum ftrace_dump_mode ftrace_dump_on_oops;
+static bool ftrace_size_check = true;
 #endif
 
 /* When set, tracing will stop when a WARN*() is hit */
@@ -9028,10 +9029,21 @@ static bool trace_skip_ftrace_dump(void)
 	return !minidump_ftrace_dump;
 }
 #else
-static void trace_check_size(struct trace_iterator iter, int cpu) { }
+static void trace_check_size(struct trace_iterator iter, int cpu)
+{
+	unsigned long buffer_size;
+
+	buffer_size = ring_buffer_size(iter.tr->trace_buffer.buffer, cpu);
+	if (buffer_size > (SZ_256K + PAGE_SIZE)) {
+		printk(KERN_TRACE "Skip md ftrace buffer dump for: %#lx\n",
+			buffer_size);
+		ftrace_size_check = false;
+	}
+
+}
 static bool trace_skip_ftrace_dump(void)
 {
-	return false;
+	return !ftrace_size_check;
 }
 #endif
 
