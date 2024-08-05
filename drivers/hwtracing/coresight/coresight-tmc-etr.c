@@ -2292,8 +2292,11 @@ int tmc_etr_switch_mode(struct tmc_drvdata *drvdata, const char *out_mode)
 		new_mode = TMC_ETR_OUT_MODE_MEM;
 	else if (!strcmp(out_mode, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_USB]))
 		new_mode = TMC_ETR_OUT_MODE_USB;
-	else if (!strcmp(out_mode, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_PCIE]))
-		new_mode = TMC_ETR_OUT_MODE_PCIE;
+	else if (!strcmp(out_mode, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_PCIE])) {
+		dev_err(&drvdata->csdev->dev, "PCIE mode is not supported.\n");
+		mutex_unlock(&drvdata->mem_lock);
+		return -EINVAL;
+	}
 	else {
 		mutex_unlock(&drvdata->mem_lock);
 		return -EINVAL;
