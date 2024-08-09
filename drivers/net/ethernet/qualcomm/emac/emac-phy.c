@@ -5,98 +5,200 @@
 /* Qualcomm Technologies, Inc. EMAC PHY Controller driver.
  */
 
+#include <linux/module.h>
+#include <linux/of.h>
+#include <linux/of_net.h>
 #include <linux/of_mdio.h>
 #include <linux/phy.h>
 #include <linux/iopoll.h>
 #include <linux/acpi.h>
-#include "emac.h"
+#include <linux/phy.h>
+#include <linux/pm_runtime.h>
+#include "emac-mac.h"
+#include "emac-defines.h"
+#include "emac-regs.h"
+#include "emac-phy.h"
+#include "emac-rgmii.h"
+#include "emac-sgmii.h"
 
-/* EMAC base register offsets */
-#define EMAC_MDIO_CTRL                                        0x001414
-#define EMAC_PHY_STS                                          0x001418
-#define EMAC_MDIO_EX_CTRL                                     0x001440
+/**
+ * emac_phy_mdio_autopoll_disable() - disable mdio autopoll
+ * @hw: the emac hardware
+ *
+ * The autopoll feature takes over the MDIO bus.  In order for
+ * the PHY driver to be able to talk to the PHY over the MDIO
+ * bus, we need to temporarily disable the autopoll feature.
+ */
+static int emac_phy_mdio_autopoll_disable(struct emac_hw *hw)
+{
+	u32 val;
 
-/* EMAC_MDIO_CTRL */
-#define MDIO_MODE                                              BIT(30)
-#define MDIO_PR                                                BIT(29)
-#define MDIO_AP_EN                                             BIT(28)
-#define MDIO_BUSY                                              BIT(27)
-#define MDIO_CLK_SEL_BMSK                                    0x7000000
-#define MDIO_CLK_SEL_SHFT                                           24
-#define MDIO_START                                             BIT(23)
-#define SUP_PREAMBLE                                           BIT(22)
-#define MDIO_RD_NWR                                            BIT(21)
-#define MDIO_REG_ADDR_BMSK                                    0x1f0000
-#define MDIO_REG_ADDR_SHFT                                          16
-#define MDIO_DATA_BMSK                                          0xffff
-#define MDIO_DATA_SHFT                                               0
+	emac_reg_update32(hw, EMAC, EMAC_MDIO_CTRL, MDIO_AP_EN, 0);
+	wmb(); /* ensure mdio autopoll disable is requested */
 
-/* EMAC_PHY_STS */
-#define PHY_ADDR_BMSK                                         0x1f0000
-#define PHY_ADDR_SHFT                                               16
+	/* wait for any mdio polling to complete */
+	if (!readl_poll_timeout(hw->reg_addr[EMAC] + EMAC_MDIO_CTRL, val,
+				!(val & MDIO_BUSY), 100, MDIO_WAIT_TIMES * 100))
+		return 0;
 
-#define MDIO_CLK_25_4                                                0
-#define MDIO_CLK_25_28                                               7
+	/* failed to disable; ensure it is enabled before returning */
+	emac_reg_update32(hw, EMAC, EMAC_MDIO_CTRL, 0, MDIO_AP_EN);
+	wmb(); /* ensure mdio autopoll is enabled */
+	return -EBUSY;
+}
 
-#define MDIO_WAIT_TIMES                                           1000
-#define MDIO_STATUS_DELAY_TIME                                       1
+/**
+ * emac_phy_mdio_autopoll_enable() - disable mdio autopoll
+ * @adpt: the emac adapter
+ *
+ * The EMAC has the ability to poll the external PHY on the MDIO
+ * bus for link state changes.  This eliminates the need for the
+ * driver to poll the phy.  If if the link state does change,
+ * the EMAC issues an interrupt on behalf of the PHY.
+ */
+static void emac_phy_mdio_autopoll_enable(struct emac_hw *hw)
+{
+	emac_reg_update32(hw, EMAC, EMAC_MDIO_CTRL, 0, MDIO_AP_EN);
+	wmb(); /* ensure mdio autopoll is enabled */
+}
 
 static int emac_mdio_read(struct mii_bus *bus, int addr, int regnum)
 {
 	struct emac_adapter *adpt = bus->priv;
-	u32 reg;
+	struct emac_hw  *hw  = &adpt->hw;
+	struct emac_phy *phy = &adpt->phy;
+	u32 reg = 0;
+	int ret = 0;
 
-	emac_reg_update32(adpt->base + EMAC_PHY_STS, PHY_ADDR_BMSK,
+/*	if (pm_runtime_enabled(adpt->netdev->dev.parent) &&
+	    pm_runtime_status_suspended(adpt->netdev->dev.parent)) {
+		emac_dbg(adpt, hw, "EMAC in suspended state\n");
+		return ret;
+	}
+*/
+	emac_reg_update32(hw, EMAC, EMAC_PHY_STS, PHY_ADDR_BMSK,
 			  (addr << PHY_ADDR_SHFT));
+	wmb(); /* ensure PHY address is set before we proceed */
 
+	reg = reg & ~(MDIO_REG_ADDR_BMSK | MDIO_CLK_SEL_BMSK |
+			MDIO_MODE | MDIO_PR);
 	reg = SUP_PREAMBLE |
 	      ((MDIO_CLK_25_4 << MDIO_CLK_SEL_SHFT) & MDIO_CLK_SEL_BMSK) |
 	      ((regnum << MDIO_REG_ADDR_SHFT) & MDIO_REG_ADDR_BMSK) |
 	      MDIO_START | MDIO_RD_NWR;
 
-	writel(reg, adpt->base + EMAC_MDIO_CTRL);
+	emac_reg_w32(hw, EMAC, EMAC_MDIO_CTRL, reg);
+	mb(); /* ensure hw starts the operation before we check for result */
 
-	if (readl_poll_timeout(adpt->base + EMAC_MDIO_CTRL, reg,
+	if (readl_poll_timeout(hw->reg_addr[EMAC] + EMAC_MDIO_CTRL, reg,
 			       !(reg & (MDIO_START | MDIO_BUSY)),
-			       MDIO_STATUS_DELAY_TIME, MDIO_WAIT_TIMES * 100))
-		return -EIO;
+			       100, MDIO_WAIT_TIMES * 100)) {
+		emac_err(adpt, "error reading phy addr %d phy reg 0x%02x\n",
+			 addr, regnum);
+		ret = -EIO;
+	} else {
+		ret = (reg >> MDIO_DATA_SHFT) & MDIO_DATA_BMSK;
 
-	return (reg >> MDIO_DATA_SHFT) & MDIO_DATA_BMSK;
+		emac_dbg(adpt, hw, "EMAC PHY ADDR %d PHY RD 0x%02x -> 0x%04x\n",
+			 addr, regnum, ret);
+	}
+
+	return ret;
 }
 
 static int emac_mdio_write(struct mii_bus *bus, int addr, int regnum, u16 val)
 {
 	struct emac_adapter *adpt = bus->priv;
-	u32 reg;
-
-	emac_reg_update32(adpt->base + EMAC_PHY_STS, PHY_ADDR_BMSK,
+	struct emac_hw  *hw  = &adpt->hw;
+	struct emac_phy *phy = &adpt->phy;
+	u32 reg = 0;
+	int ret = 0;
+	
+/*	if (pm_runtime_enabled(adpt->netdev->dev.parent) &&
+	    pm_runtime_status_suspended(adpt->netdev->dev.parent)) {
+		emac_dbg(adpt, hw, "EMAC in suspended state\n");
+		return ret;
+	}
+*/
+	emac_reg_update32(hw, EMAC, EMAC_PHY_STS, PHY_ADDR_BMSK,
 			  (addr << PHY_ADDR_SHFT));
+	wmb(); /* ensure PHY address is set before we proceed */
 
+	reg = reg & ~(MDIO_REG_ADDR_BMSK | MDIO_CLK_SEL_BMSK |
+		MDIO_DATA_BMSK | MDIO_MODE | MDIO_PR);
 	reg = SUP_PREAMBLE |
-		((MDIO_CLK_25_4 << MDIO_CLK_SEL_SHFT) & MDIO_CLK_SEL_BMSK) |
-		((regnum << MDIO_REG_ADDR_SHFT) & MDIO_REG_ADDR_BMSK) |
-		((val << MDIO_DATA_SHFT) & MDIO_DATA_BMSK) |
-		MDIO_START;
+	((MDIO_CLK_25_4 << MDIO_CLK_SEL_SHFT) & MDIO_CLK_SEL_BMSK) |
+	((regnum << MDIO_REG_ADDR_SHFT) & MDIO_REG_ADDR_BMSK) |
+	((val << MDIO_DATA_SHFT) & MDIO_DATA_BMSK) |
+	MDIO_START;
 
-	writel(reg, adpt->base + EMAC_MDIO_CTRL);
+	emac_reg_w32(hw, EMAC, EMAC_MDIO_CTRL, reg);
+	mb(); /* ensure hw starts the operation before we check for result */
 
-	if (readl_poll_timeout(adpt->base + EMAC_MDIO_CTRL, reg,
-			       !(reg & (MDIO_START | MDIO_BUSY)),
-			       MDIO_STATUS_DELAY_TIME, MDIO_WAIT_TIMES * 100))
-		return -EIO;
+	if (readl_poll_timeout(hw->reg_addr[EMAC] + EMAC_MDIO_CTRL, reg,
+			       !(reg & (MDIO_START | MDIO_BUSY)), 100,
+			       MDIO_WAIT_TIMES * 100)) {
+		emac_err(adpt, "error writing phy addr %d phy reg 0x%02x data 0x%02x\n",
+			 addr, regnum, val);
+		ret = -EIO;
+	} else {
+		emac_dbg(adpt, hw, "EMAC PHY Addr %d PHY WR 0x%02x <- 0x%04x\n",
+			 addr, regnum, val);
+	}
 
+	return ret;
+}
+
+int emac_phy_config_fc(struct emac_adapter *adpt)
+{
+	struct emac_phy *phy = &adpt->phy;
+	struct emac_hw  *hw  = &adpt->hw;
+	u32 mac;
+
+	if (phy->disable_fc_autoneg || !phy->external)
+		phy->cur_fc_mode = phy->req_fc_mode;
+
+	mac = emac_reg_r32(hw, EMAC, EMAC_MAC_CTRL);
+
+	switch (phy->cur_fc_mode) {
+	case EMAC_FC_NONE:
+		mac &= ~(RXFC | TXFC);
+		break;
+	case EMAC_FC_RX_PAUSE:
+		mac &= ~TXFC;
+		mac |= RXFC;
+		break;
+	case EMAC_FC_TX_PAUSE:
+		mac |= TXFC;
+		mac &= ~RXFC;
+		break;
+	case EMAC_FC_FULL:
+	case EMAC_FC_DEFAULT:
+		mac |= (TXFC | RXFC);
+		break;
+	default:
+		emac_err(adpt, "flow control param set incorrectly\n");
+		return -EINVAL;
+	}
+
+	emac_reg_w32(hw, EMAC, EMAC_MAC_CTRL, mac);
+	/* ensure flow control config is slushed to hw */
+	wmb();
 	return 0;
 }
 
 /* Configure the MDIO bus and connect the external PHY */
-int emac_phy_config(struct platform_device *pdev, struct emac_adapter *adpt)
+int emac_phy_config_external(struct platform_device *pdev,
+			     struct emac_adapter *adpt)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct mii_bus *mii_bus;
 	int ret;
 
 	/* Create the mii_bus object for talking to the MDIO bus */
-	adpt->mii_bus = mii_bus = devm_mdiobus_alloc(&pdev->dev);
+	mii_bus = devm_mdiobus_alloc(&pdev->dev);
+	adpt->mii_bus = mii_bus;
+
 	if (!mii_bus)
 		return -ENOMEM;
 
@@ -107,37 +209,30 @@ int emac_phy_config(struct platform_device *pdev, struct emac_adapter *adpt)
 	mii_bus->parent = &pdev->dev;
 	mii_bus->priv = adpt;
 
-	if (has_acpi_companion(&pdev->dev)) {
+	if (ACPI_COMPANION(&pdev->dev)) {
 		u32 phy_addr;
 
 		ret = mdiobus_register(mii_bus);
 		if (ret) {
-			dev_err(&pdev->dev, "could not register mdio bus\n");
+			emac_err(adpt, "could not register mdio bus\n");
 			return ret;
 		}
 		ret = device_property_read_u32(&pdev->dev, "phy-channel",
 					       &phy_addr);
-		if (ret)
+		if (ret) {
 			/* If we can't read a valid phy address, then assume
 			 * that there is only one phy on this mdio bus.
 			 */
 			adpt->phydev = phy_find_first(mii_bus);
-		else
-			adpt->phydev = mdiobus_get_phy(mii_bus, phy_addr);
-
-		/* of_phy_find_device() claims a reference to the phydev,
-		 * so we do that here manually as well. When the driver
-		 * later unloads, it can unilaterally drop the reference
-		 * without worrying about ACPI vs DT.
-		 */
-		if (adpt->phydev)
-			get_device(&adpt->phydev->mdio.dev);
+		}else {
+			adpt->phydev =mdiobus_get_phy(mii_bus, phy_addr);
+		}
 	} else {
 		struct device_node *phy_np;
 
 		ret = of_mdiobus_register(mii_bus, np);
 		if (ret) {
-			dev_err(&pdev->dev, "could not register mdio bus\n");
+			emac_err(adpt, "could not register mdio bus\n");
 			return ret;
 		}
 
@@ -147,10 +242,62 @@ int emac_phy_config(struct platform_device *pdev, struct emac_adapter *adpt)
 	}
 
 	if (!adpt->phydev) {
-		dev_err(&pdev->dev, "could not find external phy\n");
+		emac_err(adpt, "could not find external phy\n");
 		mdiobus_unregister(mii_bus);
 		return -ENODEV;
 	}
+
+	if (!adpt->phydev->phy_id) {
+		emac_err(adpt, "External phy is not up\n");
+		mdiobus_unregister(mii_bus);
+		return -EPROBE_DEFER;
+	}
+
+	if (adpt->phydev->drv) {
+		emac_dbg(adpt, probe, "attached PHY driver [%s] ",
+			 adpt->phydev->drv->name);
+		emac_dbg(adpt, probe, "(mii_bus:phy_addr=%s, irq=%d)\n",
+			 dev_name(&adpt->phydev->mdio.dev), adpt->phydev->irq);
+	}
+
+	/* Set initial link status to false */
+	adpt->phydev->link = 0;
+	return 0;
+}
+
+int emac_phy_config_internal(struct platform_device *pdev,
+			     struct emac_adapter *adpt)
+{
+	struct emac_phy *phy = &adpt->phy;
+	struct device_node *dt = pdev->dev.of_node;
+	int ret;
+
+	phy->external = !of_property_read_bool(dt, "qcom,no-external-phy");
+
+	/* Get the link mode */
+	ret = of_get_phy_mode(dt);
+	if (ret < 0) {
+		emac_err(adpt, "unknown phy mode: %s\n", phy_modes(ret));
+		return ret;
+	}
+
+	phy->phy_interface = ret;
+
+	switch (phy->phy_interface) {
+	case PHY_INTERFACE_MODE_RGMII:
+		phy->ops = emac_rgmii_ops;
+		break;
+	case PHY_INTERFACE_MODE_SGMII:
+		phy->ops = emac_sgmii_ops;
+		break;
+	default:
+		emac_err(adpt, "unsupported phy mode: %s\n", phy_modes(ret));
+		return -EINVAL;
+	}
+
+	ret = phy->ops.config(pdev, adpt);
+	if (ret)
+		return ret;
 
 	return 0;
 }
