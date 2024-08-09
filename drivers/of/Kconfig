@@ -68,7 +68,7 @@ config OF_ADDRESS
 
 config OF_IRQ
 	def_bool y
-	depends on !SPARC && IRQ_DOMAIN
+	depends on !SPARC
 
 config OF_NET
 	depends on NETDEVICES
