@@ -4,109 +4,287 @@
 
 /* Qualcomm Technologies, Inc. EMAC SGMII Controller driver.
  */
-
-#include <linux/interrupt.h>
 #include <linux/iopoll.h>
 #include <linux/acpi.h>
 #include <linux/of_device.h>
-#include "emac.h"
-#include "emac-mac.h"
+
 #include "emac-sgmii.h"
+#include "emac-mac.h"
 
-/* EMAC_SGMII register offsets */
-#define EMAC_SGMII_PHY_AUTONEG_CFG2		0x0048
-#define EMAC_SGMII_PHY_SPEED_CFG1		0x0074
-#define EMAC_SGMII_PHY_IRQ_CMD			0x00ac
-#define EMAC_SGMII_PHY_INTERRUPT_CLEAR		0x00b0
-#define EMAC_SGMII_PHY_INTERRUPT_MASK		0x00b4
-#define EMAC_SGMII_PHY_INTERRUPT_STATUS		0x00b8
-#define EMAC_SGMII_PHY_RX_CHK_STATUS		0x00d4
+#define PCS_MAX_REG_CNT		10
+#define PLL_MAX_REG_CNT		18
 
-#define FORCE_AN_TX_CFG				BIT(5)
-#define FORCE_AN_RX_CFG				BIT(4)
-#define AN_ENABLE				BIT(0)
-
-#define DUPLEX_MODE				BIT(4)
-#define SPDMODE_1000				BIT(1)
-#define SPDMODE_100				BIT(0)
-#define SPDMODE_10				0
-
-#define CDR_ALIGN_DET				BIT(6)
-
-#define IRQ_GLOBAL_CLEAR			BIT(0)
-
-#define DECODE_CODE_ERR				BIT(7)
-#define DECODE_DISP_ERR				BIT(6)
-
-#define SGMII_PHY_IRQ_CLR_WAIT_TIME		10
-
-#define SGMII_PHY_INTERRUPT_ERR		(DECODE_CODE_ERR | DECODE_DISP_ERR)
-#define SGMII_ISR_MASK  		(SGMII_PHY_INTERRUPT_ERR)
-
-#define SERDES_START_WAIT_TIMES			100
-
-int emac_sgmii_init(struct emac_adapter *adpt)
+void emac_reg_write_all(void __iomem *base, const struct emac_reg_write *itr)
 {
-	if (!(adpt->phy.sgmii_ops && adpt->phy.sgmii_ops->init))
-		return 0;
-
-	return adpt->phy.sgmii_ops->init(adpt);
+	for (; itr->offset != END_MARKER; ++itr)
+		writel_relaxed(itr->val, base + itr->offset);
 }
 
-int emac_sgmii_open(struct emac_adapter *adpt)
+static const struct emac_reg_write
+		physical_coding_sublayer_programming[][PCS_MAX_REG_CNT] = {
+	/* EMAC_PHY_MAP_DEFAULT */
+	{
+		{EMAC_SGMII_PHY_CDR_CTRL0, CDR_MAX_CNT(15)},
+		{EMAC_SGMII_PHY_POW_DWN_CTRL0, PWRDN_B},
+		{EMAC_SGMII_PHY_CMN_PWR_CTRL,
+			BIAS_EN | SYSCLK_EN | CLKBUF_L_EN | PLL_TXCLK_EN
+			| PLL_RXCLK_EN},
+		{EMAC_SGMII_PHY_TX_PWR_CTRL, L0_TX_EN | L0_CLKBUF_EN
+			| L0_TRAN_BIAS_EN},
+		{EMAC_SGMII_PHY_RX_PWR_CTRL,
+			L0_RX_SIGDET_EN | L0_RX_TERM_MODE(1) | L0_RX_I_EN},
+		{EMAC_SGMII_PHY_CMN_PWR_CTRL,
+			BIAS_EN | PLL_EN | SYSCLK_EN | CLKBUF_L_EN
+			| PLL_TXCLK_EN | PLL_RXCLK_EN},
+		{EMAC_SGMII_PHY_LANE_CTRL1,
+			L0_RX_EQUALIZE_ENABLE | L0_RESET_TSYNC_EN
+			| L0_DRV_LVL(15)},
+		{END_MARKER,			END_MARKER},
+	},
+	/* EMAC_PHY_MAP_MDM9607 */
+	{
+		{EMAC_SGMII_PHY_CDR_CTRL0, CDR_MAX_CNT(15)},
+		{EMAC_SGMII_PHY_POW_DWN_CTRL0, PWRDN_B},
+		{EMAC_SGMII_PHY_CMN_PWR_CTRL,
+			BIAS_EN | SYSCLK_EN | CLKBUF_L_EN | PLL_TXCLK_EN
+			| PLL_RXCLK_EN},
+		{EMAC_SGMII_PHY_TX_PWR_CTRL, L0_TX_EN | L0_CLKBUF_EN
+			| L0_TRAN_BIAS_EN},
+		{EMAC_SGMII_PHY_RX_PWR_CTRL,
+			L0_RX_SIGDET_EN | L0_RX_TERM_MODE(1) | L0_RX_I_EN},
+		{EMAC_SGMII_PHY_CMN_PWR_CTRL,
+			BIAS_EN | PLL_EN | SYSCLK_EN | CLKBUF_L_EN
+			| PLL_TXCLK_EN | PLL_RXCLK_EN},
+		{EMAC_QSERDES_COM_PLL_VCOTAIL_EN,	PLL_VCO_TAIL_MUX |
+				PLL_VCO_TAIL(124) | PLL_EN_VCOTAIL_EN},
+		{EMAC_QSERDES_COM_PLL_CNTRL, OCP_EN | PLL_DIV_FFEN
+			| PLL_DIV_ORD},
+		{EMAC_SGMII_PHY_LANE_CTRL1,
+			L0_RX_EQUALIZE_ENABLE | L0_RESET_TSYNC_EN
+			| L0_DRV_LVL(15)},
+		{END_MARKER,			END_MARKER}
+	},
+	/* EMAC_PHY_MAP_V2 */
+	{
+		{EMAC_SGMII_PHY_POW_DWN_CTRL0, PWRDN_B},
+		{EMAC_SGMII_PHY_CDR_CTRL0, CDR_MAX_CNT(15)},
+		{EMAC_SGMII_PHY_TX_PWR_CTRL, 0},
+		{EMAC_SGMII_PHY_LANE_CTRL1, L0_RX_EQUALIZE_ENABLE},
+		{END_MARKER,			END_MARKER}
+	}
+};
+
+static const struct emac_reg_write sysclk_refclk_setting[] = {
+	{EMAC_QSERDES_COM_SYSCLK_EN_SEL,	SYSCLK_SEL_CMOS},
+	{EMAC_QSERDES_COM_SYS_CLK_CTRL,		SYSCLK_CM | SYSCLK_AC_COUPLE},
+	{END_MARKER,				END_MARKER},
+};
+
+static const struct emac_reg_write pll_setting[][PLL_MAX_REG_CNT] = {
+	/* EMAC_PHY_MAP_DEFAULT */
+	{
+		{EMAC_QSERDES_COM_PLL_IP_SETI, PLL_IPSETI(1)},
+		{EMAC_QSERDES_COM_PLL_CP_SETI, PLL_CPSETI(59)},
+		{EMAC_QSERDES_COM_PLL_IP_SETP, PLL_IPSETP(10)},
+		{EMAC_QSERDES_COM_PLL_CP_SETP, PLL_CPSETP(9)},
+		{EMAC_QSERDES_COM_PLL_CRCTRL, PLL_RCTRL(15) | PLL_CCTRL(11)},
+		{EMAC_QSERDES_COM_PLL_CNTRL, OCP_EN | PLL_DIV_FFEN
+			| PLL_DIV_ORD},
+		{EMAC_QSERDES_COM_DEC_START1, DEC_START1_MUX | DEC_START1(2)},
+		{EMAC_QSERDES_COM_DEC_START2, DEC_START2_MUX | DEC_START2},
+		{EMAC_QSERDES_COM_DIV_FRAC_START1,
+			DIV_FRAC_START_MUX | DIV_FRAC_START(85)},
+		{EMAC_QSERDES_COM_DIV_FRAC_START2,
+			DIV_FRAC_START_MUX | DIV_FRAC_START(42)},
+		{EMAC_QSERDES_COM_DIV_FRAC_START3,
+			DIV_FRAC_START3_MUX | DIV_FRAC_START3(3)},
+		{EMAC_QSERDES_COM_PLLLOCK_CMP1, PLLLOCK_CMP(43)},
+		{EMAC_QSERDES_COM_PLLLOCK_CMP2, PLLLOCK_CMP(104)},
+		{EMAC_QSERDES_COM_PLLLOCK_CMP3, PLLLOCK_CMP(0)},
+		{EMAC_QSERDES_COM_PLLLOCK_CMP_EN, PLLLOCK_CMP_EN},
+		{EMAC_QSERDES_COM_RESETSM_CNTRL, FRQ_TUNE_MODE},
+		{END_MARKER,				END_MARKER}
+	},
+	/* EMAC_PHY_MAP_MDM9607 */
+	{
+		{EMAC_QSERDES_COM_PLL_IP_SETI, PLL_IPSETI(3)},
+		{EMAC_QSERDES_COM_PLL_CP_SETI, PLL_CPSETI(59)},
+		{EMAC_QSERDES_COM_PLL_IP_SETP, PLL_IPSETP(10)},
+		{EMAC_QSERDES_COM_PLL_CP_SETP, PLL_CPSETP(9)},
+		{EMAC_QSERDES_COM_PLL_CRCTRL, PLL_RCTRL(15) | PLL_CCTRL(11)},
+		{EMAC_QSERDES_COM_DEC_START1, DEC_START1_MUX | DEC_START1(2)},
+		{EMAC_QSERDES_COM_DEC_START2, DEC_START2_MUX | DEC_START2},
+		{EMAC_QSERDES_COM_DIV_FRAC_START1,
+			DIV_FRAC_START_MUX | DIV_FRAC_START(85)},
+		{EMAC_QSERDES_COM_DIV_FRAC_START2,
+			DIV_FRAC_START_MUX | DIV_FRAC_START(42)},
+		{EMAC_QSERDES_COM_DIV_FRAC_START3,
+			DIV_FRAC_START3_MUX | DIV_FRAC_START3(3)},
+		{EMAC_QSERDES_COM_PLLLOCK_CMP1, PLLLOCK_CMP(43)},
+		{EMAC_QSERDES_COM_PLLLOCK_CMP2, PLLLOCK_CMP(104)},
+		{EMAC_QSERDES_COM_PLLLOCK_CMP3, PLLLOCK_CMP(0)},
+		{EMAC_QSERDES_COM_PLLLOCK_CMP_EN, PLLLOCK_CMP_EN},
+		{EMAC_QSERDES_COM_RESETSM_CNTRL, FRQ_TUNE_MODE},
+		{EMAC_QSERDES_COM_RES_TRIM_SEARCH,	RESTRIM_SEARCH(0)},
+		{EMAC_QSERDES_COM_BGTC,			BGTC(7)},
+		{END_MARKER,				END_MARKER},
+	}
+};
+
+static const struct emac_reg_write cdr_setting[] = {
+	{EMAC_QSERDES_RX_CDR_CONTROL,
+		SECONDORDERENABLE | FIRSTORDER_THRESH(3) | SECONDORDERGAIN(2)},
+	{EMAC_QSERDES_RX_CDR_CONTROL2,
+		SECONDORDERENABLE | FIRSTORDER_THRESH(3) | SECONDORDERGAIN(4)},
+	{END_MARKER,				END_MARKER},
+};
+
+static const struct emac_reg_write tx_rx_setting[] = {
+	{EMAC_QSERDES_TX_BIST_MODE_LANENO, 0},
+	{EMAC_QSERDES_TX_TX_DRV_LVL, TX_DRV_LVL_MUX | TX_DRV_LVL(15)},
+	{EMAC_QSERDES_TX_TRAN_DRVR_EMP_EN, EMP_EN_MUX | EMP_EN},
+	{EMAC_QSERDES_TX_TX_EMP_POST1_LVL,
+		TX_EMP_POST1_LVL_MUX | TX_EMP_POST1_LVL(1)},
+	{EMAC_QSERDES_RX_RX_EQ_GAIN12, RX_EQ_GAIN2(15) | RX_EQ_GAIN1(15)},
+	{EMAC_QSERDES_TX_LANE_MODE, LANE_MODE(8)},
+	{END_MARKER,				END_MARKER}
+};
+
+static const struct emac_reg_write sgmii_v2_laned[] = {
+	/* CDR Settings */
+	{EMAC_SGMII_LN_UCDR_FO_GAIN_MODE0,
+		UCDR_STEP_BY_TWO_MODE0 | UCDR_XO_GAIN_MODE(10)},
+	{EMAC_SGMII_LN_UCDR_SO_GAIN_MODE0, UCDR_XO_GAIN_MODE(0)},
+	{EMAC_SGMII_LN_UCDR_SO_CONFIG, UCDR_ENABLE | UCDR_SO_SATURATION(12)},
+
+	/* TX/RX Settings */
+	{EMAC_SGMII_LN_RX_EN_SIGNAL, SIGDET_LP_BYP_PS4 | SIGDET_EN_PS0_TO_PS2},
+
+	{EMAC_SGMII_LN_DRVR_CTRL0, TXVAL_VALID_INIT | KR_PCIGEN3_MODE},
+	{EMAC_SGMII_LN_DRVR_TAP_EN, MAIN_EN},
+	{EMAC_SGMII_LN_TX_MARGINING, TX_MARGINING_MUX | TX_MARGINING(25)},
+	{EMAC_SGMII_LN_TX_PRE, TX_PRE_MUX},
+	{EMAC_SGMII_LN_TX_POST, TX_POST_MUX},
+
+	{EMAC_SGMII_LN_CML_CTRL_MODE0,
+		CML_GEAR_MODE(1) | CML2CMOS_IBOOST_MODE(1)},
+	{EMAC_SGMII_LN_MIXER_CTRL_MODE0,
+		MIXER_LOADB_MODE(12) | MIXER_DATARATE_MODE(1)},
+	{EMAC_SGMII_LN_VGA_INITVAL, VGA_THRESH_DFE(31)},
+	{EMAC_SGMII_LN_SIGDET_ENABLES,
+		SIGDET_LP_BYP_PS0_TO_PS2 | SIGDET_FLT_BYP},
+	{EMAC_SGMII_LN_SIGDET_CNTRL, SIGDET_LVL(8)},
+
+	{EMAC_SGMII_LN_SIGDET_DEGLITCH_CNTRL, SIGDET_DEGLITCH_CTRL(4)},
+	{EMAC_SGMII_LN_RX_MISC_CNTRL0, 0},
+	{EMAC_SGMII_LN_DRVR_LOGIC_CLKDIV,
+		DRVR_LOGIC_CLK_EN | DRVR_LOGIC_CLK_DIV(4)},
+
+	{EMAC_SGMII_LN_PARALLEL_RATE, PARALLEL_RATE_MODE0(1)},
+	{EMAC_SGMII_LN_TX_BAND_MODE, BAND_MODE0(2)},
+	{EMAC_SGMII_LN_RX_BAND, BAND_MODE0(3)},
+	{EMAC_SGMII_LN_LANE_MODE, LANE_MODE(26)},
+	{EMAC_SGMII_LN_RX_RCVR_PATH1_MODE0, CDR_PD_SEL_MODE0(3)},
+	{EMAC_SGMII_LN_RSM_CONFIG, BYPASS_RSM_SAMP_CAL | BYPASS_RSM_DLL_CAL},
+	{END_MARKER,				END_MARKER}
+};
+
+void emac_sgmii_reset_prepare(struct emac_adapter *adpt)
 {
-	if (!(adpt->phy.sgmii_ops && adpt->phy.sgmii_ops->open))
-		return 0;
-
-	return adpt->phy.sgmii_ops->open(adpt);
-}
-
-void emac_sgmii_close(struct emac_adapter *adpt)
-{
-	if (!(adpt->phy.sgmii_ops && adpt->phy.sgmii_ops->close))
-		return;
-
-	adpt->phy.sgmii_ops->close(adpt);
-}
-
-int emac_sgmii_link_change(struct emac_adapter *adpt, bool link_state)
-{
-	if (!(adpt->phy.sgmii_ops && adpt->phy.sgmii_ops->link_change))
-		return 0;
-
-	return adpt->phy.sgmii_ops->link_change(adpt, link_state);
-}
-
-void emac_sgmii_reset(struct emac_adapter *adpt)
-{
-	if (!(adpt->phy.sgmii_ops && adpt->phy.sgmii_ops->reset))
-		return;
-
-	adpt->phy.sgmii_ops->reset(adpt);
-}
-
-/* Initialize the SGMII link between the internal and external PHYs. */
-static void emac_sgmii_link_init(struct emac_adapter *adpt)
-{
-	struct emac_sgmii *phy = &adpt->phy;
+	struct emac_sgmii *sgmii = adpt->phy.private;
 	u32 val;
 
-	/* Always use autonegotiation. It works no matter how the external
-	 * PHY is configured.
+	/* Reset PHY */
+	val = readl_relaxed(sgmii->base + EMAC_EMAC_WRAPPER_CSR2);
+	writel_relaxed(((val & ~PHY_RESET) | PHY_RESET),
+		       sgmii->base + EMAC_EMAC_WRAPPER_CSR2);
+	/* Ensure phy-reset command is written to HW before the release cmd */
+	wmb();
+	msleep(50);
+	val = readl_relaxed(sgmii->base + EMAC_EMAC_WRAPPER_CSR2);
+	writel_relaxed((val & ~PHY_RESET),
+		       sgmii->base + EMAC_EMAC_WRAPPER_CSR2);
+	/* Ensure phy-reset release command is written to HW before initializing
+	 * SGMII
 	 */
-	val = readl(phy->base + EMAC_SGMII_PHY_AUTONEG_CFG2);
-	val &= ~(FORCE_AN_RX_CFG | FORCE_AN_TX_CFG);
-	val |= AN_ENABLE;
-	writel(val, phy->base + EMAC_SGMII_PHY_AUTONEG_CFG2);
+	wmb();
+	msleep(50);
 }
 
-static int emac_sgmii_irq_clear(struct emac_adapter *adpt, u8 irq_bits)
+static void emac_sgmii_reset(struct emac_adapter *adpt)
 {
-	struct emac_sgmii *phy = &adpt->phy;
-	u8 status;
+	struct emac_sgmii *sgmii = adpt->phy.private;
+	int ret;
 
-	writel_relaxed(irq_bits, phy->base + EMAC_SGMII_PHY_INTERRUPT_CLEAR);
-	writel_relaxed(IRQ_GLOBAL_CLEAR, phy->base + EMAC_SGMII_PHY_IRQ_CMD);
+	emac_clk_set_rate(adpt, EMAC_CLK_HIGH_SPEED, EMC_CLK_RATE_19_2MHZ);
+	emac_sgmii_reset_prepare(adpt);
+
+	ret = sgmii->initialize(adpt);
+	if (ret)
+		emac_err(adpt,
+			 "could not reinitialize internal PHY (error=%i)\n",
+			 ret);
+
+	emac_clk_set_rate(adpt, EMAC_CLK_HIGH_SPEED, EMC_CLK_RATE_125MHZ);
+}
+
+/* LINK */
+int emac_sgmii_link_init(struct emac_adapter *adpt)
+{
+	struct phy_device *phydev = adpt->phydev;
+	struct emac_sgmii *sgmii = adpt->phy.private;
+	u32 val;
+	int autoneg, speed, duplex;
+
+	autoneg = (adpt->phydev) ? phydev->autoneg : AUTONEG_ENABLE;
+	speed = (adpt->phydev) ? phydev->speed : SPEED_UNKNOWN;
+	duplex = (adpt->phydev) ? phydev->duplex : DUPLEX_UNKNOWN;
+
+	val = readl_relaxed(sgmii->base + EMAC_SGMII_PHY_AUTONEG_CFG2);
+
+	if (autoneg == AUTONEG_ENABLE) {
+		val &= ~(FORCE_AN_RX_CFG | FORCE_AN_TX_CFG);
+		val |= AN_ENABLE;
+		writel_relaxed(val,
+			       sgmii->base + EMAC_SGMII_PHY_AUTONEG_CFG2);
+	} else {
+		u32 speed_cfg = 0;
+
+		switch (speed) {
+		case SPEED_10:
+			speed_cfg = SPDMODE_10;
+			break;
+		case SPEED_100:
+			speed_cfg = SPDMODE_100;
+			break;
+		case SPEED_1000:
+			speed_cfg = SPDMODE_1000;
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		if (duplex == DUPLEX_FULL)
+			speed_cfg |= DUPLEX_MODE;
+
+		val &= ~AN_ENABLE;
+		writel_relaxed(speed_cfg,
+			       sgmii->base + EMAC_SGMII_PHY_SPEED_CFG1);
+		writel_relaxed(val, sgmii->base + EMAC_SGMII_PHY_AUTONEG_CFG2);
+	}
+	/* Ensure Auto-Neg setting are written to HW before leaving */
+	wmb();
+
+	return 0;
+}
+
+int emac_sgmii_irq_clear(struct emac_adapter *adpt, u32 irq_bits)
+{
+	struct emac_sgmii *sgmii = adpt->phy.private;
+	u32 status;
+
+	writel_relaxed(irq_bits, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_CLEAR);
+	writel_relaxed(IRQ_GLOBAL_CLEAR, sgmii->base + EMAC_SGMII_PHY_IRQ_CMD);
 	/* Ensure interrupt clear command is written to HW */
 	wmb();
 
@@ -114,234 +292,440 @@ static int emac_sgmii_irq_clear(struct emac_adapter *adpt, u8 irq_bits)
 	 * be confirmed before clearing the bits in other registers.
 	 * It takes a few cycles for hw to clear the interrupt status.
 	 */
-	if (readl_poll_timeout_atomic(phy->base +
+	if (readl_poll_timeout_atomic(sgmii->base +
 				      EMAC_SGMII_PHY_INTERRUPT_STATUS,
 				      status, !(status & irq_bits), 1,
 				      SGMII_PHY_IRQ_CLR_WAIT_TIME)) {
-		net_err_ratelimited("%s: failed to clear SGMII irq: status:0x%x bits:0x%x\n",
-				    adpt->netdev->name, status, irq_bits);
+		emac_err(adpt,
+			 "error: failed clear SGMII irq: status:0x%x bits:0x%x\n",
+			 status, irq_bits);
+		/* Finalize clearing procedure */
+		writel_relaxed(0, sgmii->base + EMAC_SGMII_PHY_IRQ_CMD);
+		writel_relaxed(0, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_CLEAR);
+		/* Ensure that clearing procedure finalization is written to HW */
+		wmb();
 		return -EIO;
 	}
 
 	/* Finalize clearing procedure */
-	writel_relaxed(0, phy->base + EMAC_SGMII_PHY_IRQ_CMD);
-	writel_relaxed(0, phy->base + EMAC_SGMII_PHY_INTERRUPT_CLEAR);
-
+	writel_relaxed(0, sgmii->base + EMAC_SGMII_PHY_IRQ_CMD);
+	writel_relaxed(0, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_CLEAR);
 	/* Ensure that clearing procedure finalization is written to HW */
 	wmb();
 
 	return 0;
 }
 
-/* The number of decode errors that triggers a reset */
-#define DECODE_ERROR_LIMIT	2
-
-static irqreturn_t emac_sgmii_interrupt(int irq, void *data)
+int emac_sgmii_init_ephy_nop(struct emac_adapter *adpt)
 {
-	struct emac_adapter *adpt = data;
-	struct emac_sgmii *phy = &adpt->phy;
-	u8 status;
+	return 0;
+}
 
-	status = readl(phy->base + EMAC_SGMII_PHY_INTERRUPT_STATUS);
-	status &= SGMII_ISR_MASK;
-	if (!status)
-		return IRQ_HANDLED;
+int emac_sgmii_autoneg_check(struct emac_adapter *adpt,
+			     struct phy_device *phydev)
+{
+	struct emac_sgmii *sgmii = adpt->phy.private;
+	u32 autoneg0, autoneg1, status;
 
-	/* If we get a decoding error and CDR is not locked, then try
-	 * resetting the internal PHY.  The internal PHY uses an embedded
-	 * clock with Clock and Data Recovery (CDR) to recover the
-	 * clock and data.
-	 */
-	if (status & SGMII_PHY_INTERRUPT_ERR) {
-		int count;
+	autoneg0 = readl_relaxed(sgmii->base + EMAC_SGMII_PHY_AUTONEG0_STATUS);
+	autoneg1 = readl_relaxed(sgmii->base + EMAC_SGMII_PHY_AUTONEG1_STATUS);
+	status   = ((autoneg1 & 0xff) << 8) | (autoneg0 & 0xff);
 
-		/* The SGMII is capable of recovering from some decode
-		 * errors automatically.  However, if we get multiple
-		 * decode errors in a row, then assume that something
-		 * is wrong and reset the interface.
-		 */
-		count = atomic_inc_return(&phy->decode_error_count);
-		if (count == DECODE_ERROR_LIMIT) {
-			schedule_work(&adpt->work_thread);
-			atomic_set(&phy->decode_error_count, 0);
-		}
-	} else {
-		/* We only care about consecutive decode errors. */
-		atomic_set(&phy->decode_error_count, 0);
+	if (!(status & TXCFG_LINK)) {
+		phydev->link = false;
+		phydev->speed = SPEED_UNKNOWN;
+		phydev->duplex = DUPLEX_UNKNOWN;
+		return 0;
 	}
 
-	if (emac_sgmii_irq_clear(adpt, status))
-		schedule_work(&adpt->work_thread);
+	phydev->link = true;
+
+	switch (status & TXCFG_MODE_BMSK) {
+	case TXCFG_1000_FULL:
+		phydev->speed = SPEED_1000;
+		phydev->duplex = DUPLEX_FULL;
+		break;
+	case TXCFG_100_FULL:
+		phydev->speed = SPEED_100;
+		phydev->duplex = DUPLEX_FULL;
+		break;
+	case TXCFG_100_HALF:
+		phydev->speed = SPEED_100;
+		phydev->duplex = DUPLEX_HALF;
+		break;
+	case TXCFG_10_FULL:
+		phydev->speed = SPEED_10;
+		phydev->duplex = DUPLEX_FULL;
+		break;
+	case TXCFG_10_HALF:
+		phydev->speed = SPEED_10;
+		phydev->duplex = DUPLEX_HALF;
+		break;
+	default:
+		phydev->speed = SPEED_UNKNOWN;
+		phydev->duplex = DUPLEX_UNKNOWN;
+		break;
+	}
+	return 0;
+}
+
+int emac_sgmii_link_check_no_ephy(struct emac_adapter *adpt,
+				  struct phy_device *phydev)
+{
+	struct emac_sgmii *sgmii = adpt->phy.private;
+	u32 val;
+
+	val = readl_relaxed(sgmii->base + EMAC_SGMII_PHY_AUTONEG_CFG2);
+	if (val & AN_ENABLE)
+		return emac_sgmii_autoneg_check(adpt, phydev);
+
+	val = readl_relaxed(sgmii->base + EMAC_SGMII_PHY_SPEED_CFG1);
+	val &= DUPLEX_MODE | SPDMODE_BMSK;
+	switch (val) {
+	case DUPLEX_MODE | SPDMODE_1000:
+		phydev->speed = SPEED_1000;
+		phydev->duplex = DUPLEX_FULL;
+		break;
+	case DUPLEX_MODE | SPDMODE_100:
+		phydev->speed = SPEED_100;
+		phydev->duplex = DUPLEX_FULL;
+		break;
+	case SPDMODE_100:
+		phydev->speed = SPEED_100;
+		phydev->duplex = DUPLEX_HALF;
+		break;
+	case DUPLEX_MODE | SPDMODE_10:
+		phydev->speed = SPEED_10;
+		phydev->duplex = DUPLEX_FULL;
+		break;
+	case SPDMODE_10:
+		phydev->speed = SPEED_10;
+		phydev->duplex = DUPLEX_HALF;
+		break;
+	default:
+		phydev->speed = SPEED_UNKNOWN;
+		phydev->duplex = DUPLEX_UNKNOWN;
+		break;
+	}
+	phydev->link = true;
+	return 0;
+}
+
+irqreturn_t emac_sgmii_isr(int _irq, void *data)
+{
+	struct emac_adapter *adpt = data;
+	struct emac_sgmii *sgmii = adpt->phy.private;
+	u32 status;
+
+	emac_dbg(adpt, intr, "receive sgmii interrupt\n");
+
+	do {
+		status = readl_relaxed(sgmii->base +
+				       EMAC_SGMII_PHY_INTERRUPT_STATUS) &
+				       SGMII_ISR_MASK;
+		if (!status)
+			break;
+
+		if (status & SGMII_PHY_INTERRUPT_ERR) {
+			SET_FLAG(adpt, ADPT_TASK_CHK_SGMII_REQ);
+			if (!TEST_FLAG(adpt, ADPT_STATE_DOWN))
+				emac_task_schedule(adpt);
+		}
+
+		if (status & SGMII_ISR_AN_MASK)
+			emac_check_lsc(adpt);
+
+		if (emac_sgmii_irq_clear(adpt, status) != 0) {
+			/* reset */
+			SET_FLAG(adpt, ADPT_TASK_REINIT_REQ);
+			emac_task_schedule(adpt);
+			break;
+		}
+	} while (1);
 
 	return IRQ_HANDLED;
 }
 
-static void emac_sgmii_reset_prepare(struct emac_adapter *adpt)
+int emac_sgmii_up(struct emac_adapter *adpt)
 {
-	struct emac_sgmii *phy = &adpt->phy;
-	u32 val;
-
-	/* Reset PHY */
-	val = readl(phy->base + EMAC_EMAC_WRAPPER_CSR2);
-	writel(((val & ~PHY_RESET) | PHY_RESET), phy->base +
-	       EMAC_EMAC_WRAPPER_CSR2);
-	/* Ensure phy-reset command is written to HW before the release cmd */
-	msleep(50);
-	val = readl(phy->base + EMAC_EMAC_WRAPPER_CSR2);
-	writel((val & ~PHY_RESET), phy->base + EMAC_EMAC_WRAPPER_CSR2);
-	/* Ensure phy-reset release command is written to HW before initializing
-	 * SGMII
-	 */
-	msleep(50);
-}
-
-static void emac_sgmii_common_reset(struct emac_adapter *adpt)
-{
+	struct emac_sgmii *sgmii = adpt->phy.private;
 	int ret;
 
-	emac_sgmii_reset_prepare(adpt);
-	emac_sgmii_link_init(adpt);
-
-	ret = emac_sgmii_init(adpt);
-	if (ret)
-		netdev_err(adpt->netdev,
-			   "could not reinitialize internal PHY (error=%i)\n",
-			   ret);
-}
-
-static int emac_sgmii_common_open(struct emac_adapter *adpt)
-{
-	struct emac_sgmii *sgmii = &adpt->phy;
-	int ret;
-
-	if (sgmii->irq) {
-		/* Make sure interrupts are cleared and disabled first */
-		ret = emac_sgmii_irq_clear(adpt, 0xff);
-		if (ret)
-			return ret;
-		writel(0, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_MASK);
-
-		ret = request_irq(sgmii->irq, emac_sgmii_interrupt, 0,
-				  "emac-sgmii", adpt);
-		if (ret) {
-			netdev_err(adpt->netdev,
-				   "could not register handler for internal PHY\n");
-			return ret;
-		}
+	ret = request_irq(sgmii->irq, emac_sgmii_isr, IRQF_TRIGGER_RISING,
+			  "sgmii_irq", adpt);
+	if (ret) {
+		emac_err(adpt,
+			 "error:%d on request_irq(%d:sgmii_irq)\n", ret,
+			 sgmii->irq);
 	}
+	/* enable sgmii irq */
+	writel_relaxed(SGMII_ISR_MASK,
+		       sgmii->base + EMAC_SGMII_PHY_INTERRUPT_MASK);
 
-	return 0;
+	return ret;
 }
 
-static void emac_sgmii_common_close(struct emac_adapter *adpt)
+void emac_sgmii_down(struct emac_adapter *adpt)
 {
-	struct emac_sgmii *sgmii = &adpt->phy;
+	struct emac_sgmii *sgmii = adpt->phy.private;
 
-	/* Make sure interrupts are disabled */
-	writel(0, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_MASK);
+	writel_relaxed(0, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_MASK);
+	synchronize_irq(sgmii->irq);
 	free_irq(sgmii->irq, adpt);
 }
 
-/* The error interrupts are only valid after the link is up */
-static int emac_sgmii_common_link_change(struct emac_adapter *adpt, bool linkup)
+int emac_sgmii_link_setup_no_ephy(struct emac_adapter *adpt)
 {
-	struct emac_sgmii *sgmii = &adpt->phy;
+	struct emac_sgmii *sgmii = adpt->phy.private;
+
+	/* The AN_ENABLE and SPEED_CFG can't change on fly. The SGMII_PHY has
+	 * to be re-initialized.
+	 */
+	emac_sgmii_reset_prepare(adpt);
+	return sgmii->initialize(adpt);
+}
+
+void emac_sgmii_tx_clk_set_rate_nop(struct emac_adapter *adpt)
+{
+}
+
+/* Check SGMII for error */
+void emac_sgmii_periodic_check(struct emac_adapter *adpt)
+{
+	struct emac_sgmii *sgmii = adpt->phy.private;
+
+	if (!TEST_FLAG(adpt, ADPT_TASK_CHK_SGMII_REQ))
+		return;
+	CLR_FLAG(adpt, ADPT_TASK_CHK_SGMII_REQ);
+
+	/* ensure that no reset is in progress while link task is running */
+	while (TEST_N_SET_FLAG(adpt, ADPT_STATE_RESETTING))
+		msleep(20); /* Reset might take few 10s of ms */
+
+	if (TEST_FLAG(adpt, ADPT_STATE_DOWN))
+		goto sgmii_task_done;
+
+	if (readl_relaxed(sgmii->base + EMAC_SGMII_PHY_RX_CHK_STATUS) & 0x40)
+		goto sgmii_task_done;
+
+	emac_err(adpt, "SGMII CDR not locked\n");
+
+sgmii_task_done:
+	CLR_FLAG(adpt, ADPT_STATE_RESETTING);
+}
+
+static int emac_sgmii_init_v1_0(struct emac_adapter *adpt)
+{
+	struct emac_phy *phy = &adpt->phy;
+	struct emac_sgmii *sgmii = phy->private;
+	unsigned i;
 	int ret;
 
-	if (linkup) {
-		/* Clear and enable interrupts */
-		ret = emac_sgmii_irq_clear(adpt, 0xff);
-		if (ret)
-			return ret;
+	ret = emac_sgmii_link_init(adpt);
+	if (ret)
+		return ret;
 
-		writel(SGMII_ISR_MASK,
-		       sgmii->base + EMAC_SGMII_PHY_INTERRUPT_MASK);
-	} else {
-		/* Disable interrupts */
-		writel(0, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_MASK);
-		synchronize_irq(sgmii->irq);
+	emac_reg_write_all(
+		sgmii->base,
+		(const struct emac_reg_write *)
+		&physical_coding_sublayer_programming[EMAC_PHY_MAP_DEFAULT]);
+
+	/* Ensure Rx/Tx lanes power configuration is written to hw before
+	 * configuring the SerDes engine's clocks
+	 */
+	wmb();
+
+	emac_reg_write_all(sgmii->base, sysclk_refclk_setting);
+	emac_reg_write_all(
+		sgmii->base,
+		(const struct emac_reg_write *)
+		&pll_setting[EMAC_PHY_MAP_DEFAULT]);
+	emac_reg_write_all(sgmii->base, cdr_setting);
+	emac_reg_write_all(sgmii->base, tx_rx_setting);
+
+	/* Ensure SerDes engine configuration is written to hw before powering
+	 * it up
+	 */
+	wmb();
+
+	writel_relaxed(SERDES_START, sgmii->base + EMAC_SGMII_PHY_SERDES_START);
+
+	/* Ensure Rx/Tx SerDes engine power-up command is written to HW */
+	wmb();
+
+	for (i = 0; i < SERDES_START_WAIT_TIMES; i++) {
+		if (readl_relaxed(sgmii->base + EMAC_QSERDES_COM_RESET_SM)
+				 & READY)
+			break;
+		usleep_range(100, 200);
 	}
+
+	if (i == SERDES_START_WAIT_TIMES) {
+		emac_err(adpt, "serdes failed to start\n");
+		return -EIO;
+	}
+	/* Mask out all the SGMII Interrupt */
+	writel_relaxed(0, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_MASK);
+	/* Ensure SGMII interrupts are masked out before clearing them */
+	wmb();
+
+	emac_sgmii_irq_clear(adpt, SGMII_PHY_INTERRUPT_ERR);
 
 	return 0;
 }
 
-static struct sgmii_ops fsm9900_ops = {
-	.init = emac_sgmii_init_fsm9900,
-	.open = emac_sgmii_common_open,
-	.close = emac_sgmii_common_close,
-	.link_change = emac_sgmii_common_link_change,
-	.reset = emac_sgmii_common_reset,
-};
+static int emac_sgmii_init_v1_1(struct emac_adapter *adpt)
+{
+	struct emac_phy *phy = &adpt->phy;
+	struct emac_sgmii *sgmii = phy->private;
+	unsigned i;
+	int ret;
 
-static struct sgmii_ops qdf2432_ops = {
-	.init = emac_sgmii_init_qdf2432,
-	.open = emac_sgmii_common_open,
-	.close = emac_sgmii_common_close,
-	.link_change = emac_sgmii_common_link_change,
-	.reset = emac_sgmii_common_reset,
-};
+	ret = emac_sgmii_link_init(adpt);
+	if (ret)
+		return ret;
 
-#ifdef CONFIG_ACPI
-static struct sgmii_ops qdf2400_ops = {
-	.init = emac_sgmii_init_qdf2400,
-	.open = emac_sgmii_common_open,
-	.close = emac_sgmii_common_close,
-	.link_change = emac_sgmii_common_link_change,
-	.reset = emac_sgmii_common_reset,
-};
-#endif
+	emac_reg_write_all(
+		sgmii->base,
+		(const struct emac_reg_write *)
+		&physical_coding_sublayer_programming[EMAC_PHY_MAP_MDM9607]);
+
+	/* Ensure Rx/Tx lanes power configuration is written to hw before
+	 * configuring the SerDes engine's clocks
+	 */
+	wmb();
+
+	emac_reg_write_all(sgmii->base, sysclk_refclk_setting);
+	emac_reg_write_all(
+		sgmii->base,
+		(const struct emac_reg_write *)
+		&pll_setting[EMAC_PHY_MAP_MDM9607]);
+	emac_reg_write_all(sgmii->base, cdr_setting);
+	emac_reg_write_all(sgmii->base, tx_rx_setting);
+
+	/* Ensure SerDes engine configuration is written to hw before powering
+	 * it up
+	 */
+	wmb();
+
+	/* Power up the Ser/Des engine */
+	writel_relaxed(SERDES_START, sgmii->base + EMAC_SGMII_PHY_SERDES_START);
+
+	/* Ensure Rx/Tx SerDes engine power-up command is written to HW */
+	wmb();
+
+	for (i = 0; i < SERDES_START_WAIT_TIMES; i++) {
+		if (readl_relaxed(sgmii->base + EMAC_QSERDES_COM_RESET_SM)
+				 & READY)
+			break;
+		usleep_range(100, 200);
+	}
+
+	if (i == SERDES_START_WAIT_TIMES) {
+		emac_err(adpt, "serdes failed to start\n");
+		return -EIO;
+	}
+	/* Mask out all the SGMII Interrupt */
+	writel_relaxed(0, sgmii->base + EMAC_SGMII_PHY_INTERRUPT_MASK);
+	/* Ensure SGMII interrupts are masked out before clearing them */
+	wmb();
+
+	emac_sgmii_irq_clear(adpt, SGMII_PHY_INTERRUPT_ERR);
+
+	return 0;
+}
+
+static int emac_sgmii_init_v2(struct emac_adapter *adpt)
+{
+	struct emac_phy *phy = &adpt->phy;
+	struct emac_sgmii *sgmii = phy->private;
+	void __iomem *phy_regs = sgmii->base;
+	void __iomem *laned = sgmii->digital;
+	unsigned int i;
+	u32 lnstatus;
+	int ret;
+
+	ret = emac_sgmii_link_init(adpt);
+	if (ret)
+		return ret;
+
+	/* PCS lane-x init */
+	emac_reg_write_all(
+		sgmii->base,
+		(const struct emac_reg_write *)
+		&physical_coding_sublayer_programming[EMAC_PHY_MAP_V2]);
+
+	/* Ensure Rx/Tx lanes power configuration is written to hw before
+	 * configuring the SerDes engine's clocks
+	 */
+	wmb();
+
+	/* SGMII lane-x init */
+	emac_reg_write_all(sgmii->digital, sgmii_v2_laned);
+
+	/* Power up PCS and start reset lane state machine */
+	writel_relaxed(0, phy_regs + EMAC_SGMII_PHY_RESET_CTRL);
+	writel_relaxed(1, laned + SGMII_LN_RSM_START);
+	wmb(); /* ensure power up is written before checking lane status */
+
+	/* Wait for c_ready assertion */
+	for (i = 0; i < SERDES_START_WAIT_TIMES; i++) {
+		lnstatus = readl_relaxed(phy_regs + SGMII_PHY_LN_LANE_STATUS);
+		rmb(); /* ensure status read is complete before testing it */
+		if (lnstatus & BIT(1))
+			break;
+		usleep_range(100, 200);
+	}
+
+	if (i == SERDES_START_WAIT_TIMES) {
+		emac_err(adpt, "SGMII failed to start\n");
+		return -EIO;
+	}
+
+	/* Disable digital and SERDES loopback */
+	writel_relaxed(0, phy_regs + SGMII_PHY_LN_BIST_GEN0);
+	writel_relaxed(0, phy_regs + SGMII_PHY_LN_BIST_GEN2);
+	writel_relaxed(0, phy_regs + SGMII_PHY_LN_CDR_CTRL1);
+
+	/* Mask out all the SGMII Interrupt */
+	writel_relaxed(0, phy_regs + EMAC_SGMII_PHY_INTERRUPT_MASK);
+	wmb(); /* ensure writes are flushed to hw */
+
+	emac_sgmii_irq_clear(adpt, SGMII_PHY_INTERRUPT_ERR);
+
+	return 0;
+}
 
 static int emac_sgmii_acpi_match(struct device *dev, void *data)
 {
-#ifdef CONFIG_ACPI
 	static const struct acpi_device_id match_table[] = {
 		{
 			.id = "QCOM8071",
+			.driver_data = (kernel_ulong_t)emac_sgmii_init_v2,
 		},
 		{}
 	};
 	const struct acpi_device_id *id = acpi_match_device(match_table, dev);
-	struct sgmii_ops **ops = data;
+	emac_sgmii_initialize *initialize = data;
 
-	if (id) {
-		acpi_handle handle = ACPI_HANDLE(dev);
-		unsigned long long hrv;
-		acpi_status status;
+	if (id)
+		*initialize = (emac_sgmii_initialize)id->driver_data;
 
-		status = acpi_evaluate_integer(handle, "_HRV", NULL, &hrv);
-		if (status) {
-			if (status == AE_NOT_FOUND)
-				/* Older versions of the QDF2432 ACPI tables do
-				 * not have an _HRV property.
-				 */
-				hrv = 1;
-			else
-				/* Something is wrong with the tables */
-				return 0;
-		}
-
-		switch (hrv) {
-		case 1:
-			*ops = &qdf2432_ops;
-			return 1;
-		case 2:
-			*ops = &qdf2400_ops;
-			return 1;
-		}
-	}
-#endif
-
-	return 0;
+	return !!id;
 }
 
 static const struct of_device_id emac_sgmii_dt_match[] = {
 	{
 		.compatible = "qcom,fsm9900-emac-sgmii",
-		.data = &fsm9900_ops,
+		.data = emac_sgmii_init_v1_0,
 	},
 	{
 		.compatible = "qcom,qdf2432-emac-sgmii",
-		.data = &qdf2432_ops,
+		.data = emac_sgmii_init_v2,
+	},
+	{
+		.compatible = "qcom,mdm9607-emac-sgmii",
+		.data = emac_sgmii_init_v1_1,
 	},
 	{}
 };
@@ -349,19 +733,23 @@ static const struct of_device_id emac_sgmii_dt_match[] = {
 int emac_sgmii_config(struct platform_device *pdev, struct emac_adapter *adpt)
 {
 	struct platform_device *sgmii_pdev = NULL;
-	struct emac_sgmii *phy = &adpt->phy;
+	struct emac_sgmii *sgmii;
 	struct resource *res;
-	int ret;
+	int ret = 0;
 
-	if (has_acpi_companion(&pdev->dev)) {
+	sgmii = devm_kzalloc(&pdev->dev, sizeof(*sgmii), GFP_KERNEL);
+	if (!sgmii)
+		return -ENOMEM;
+
+	if (ACPI_COMPANION(&pdev->dev)) {
 		struct device *dev;
 
-		dev = device_find_child(&pdev->dev, &phy->sgmii_ops,
+		dev = device_find_child(&pdev->dev, &sgmii->initialize,
 					emac_sgmii_acpi_match);
 
 		if (!dev) {
-			dev_warn(&pdev->dev, "cannot find internal phy node\n");
-			return 0;
+			emac_err(adpt, "cannot find internal phy node\n");
+			return -ENODEV;
 		}
 
 		sgmii_pdev = to_platform_device(dev);
@@ -371,59 +759,71 @@ int emac_sgmii_config(struct platform_device *pdev, struct emac_adapter *adpt)
 
 		np = of_parse_phandle(pdev->dev.of_node, "internal-phy", 0);
 		if (!np) {
-			dev_err(&pdev->dev, "missing internal-phy property\n");
+			emac_err(adpt, "missing internal-phy property\n");
 			return -ENODEV;
 		}
 
 		sgmii_pdev = of_find_device_by_node(np);
-		of_node_put(np);
 		if (!sgmii_pdev) {
-			dev_err(&pdev->dev, "invalid internal-phy property\n");
+			emac_err(adpt, "invalid internal-phy property\n");
 			return -ENODEV;
 		}
 
 		match = of_match_device(emac_sgmii_dt_match, &sgmii_pdev->dev);
 		if (!match) {
-			dev_err(&pdev->dev, "unrecognized internal phy node\n");
+			emac_err(adpt, "unrecognized internal phy node\n");
 			ret = -ENODEV;
 			goto error_put_device;
 		}
 
-		phy->sgmii_ops = (struct sgmii_ops *)match->data;
+		sgmii->initialize = (emac_sgmii_initialize)match->data;
 	}
 
 	/* Base address is the first address */
-	res = platform_get_resource(sgmii_pdev, IORESOURCE_MEM, 0);
+	res = platform_get_resource_byname(sgmii_pdev, IORESOURCE_MEM,
+					   "emac_sgmii");
 	if (!res) {
+		emac_err(adpt,
+			 "error platform_get_resource_byname(emac_sgmii)\n");
 		ret = -EINVAL;
 		goto error_put_device;
 	}
 
-	phy->base = ioremap(res->start, resource_size(res));
-	if (!phy->base) {
+	sgmii->base = ioremap(res->start, resource_size(res));
+	if (IS_ERR(sgmii->base)) {
+		emac_err(adpt,
+			 "error:%ld remap (start:0x%lx size:0x%lx)\n",
+			 PTR_ERR(sgmii->base), (ulong)res->start,
+			 (ulong)resource_size(res));
 		ret = -ENOMEM;
 		goto error_put_device;
 	}
 
 	/* v2 SGMII has a per-lane digital digital, so parse it if it exists */
-	res = platform_get_resource(sgmii_pdev, IORESOURCE_MEM, 1);
+	res = platform_get_resource_byname(sgmii_pdev, IORESOURCE_MEM,
+					   "emac_digital");
 	if (res) {
-		phy->digital = ioremap(res->start, resource_size(res));
-		if (!phy->digital) {
+		sgmii->digital = devm_ioremap_resource(&sgmii_pdev->dev, res);
+		if (IS_ERR(sgmii->digital)) {
+			emac_err(adpt,
+				 "error:%ld devm_ioremap_resource(start:0x%lx size:0x%lx)\n",
+				 PTR_ERR(sgmii->base), (ulong)res->start,
+				 (ulong)resource_size(res));
 			ret = -ENOMEM;
 			goto error_unmap_base;
 		}
 	}
 
-	ret = emac_sgmii_init(adpt);
-	if (ret)
+	ret = platform_get_irq_byname(sgmii_pdev, "emac_sgmii_irq");
+	if (ret < 0)
 		goto error;
 
-	emac_sgmii_link_init(adpt);
+	sgmii->irq = ret;
+	adpt->phy.private = sgmii;
 
-	ret = platform_get_irq(sgmii_pdev, 0);
-	if (ret > 0)
-		phy->irq = ret;
+	ret = sgmii->initialize(adpt);
+	if (ret)
+		goto error;
 
 	/* We've remapped the addresses, so we don't need the device any
 	 * more.  of_find_device_by_node() says we should release it.
@@ -433,12 +833,23 @@ int emac_sgmii_config(struct platform_device *pdev, struct emac_adapter *adpt)
 	return 0;
 
 error:
-	if (phy->digital)
-		iounmap(phy->digital);
+	if (sgmii->digital)
+		iounmap(sgmii->digital);
 error_unmap_base:
-	iounmap(phy->base);
+	iounmap(sgmii->base);
 error_put_device:
 	put_device(&sgmii_pdev->dev);
 
 	return ret;
 }
+
+struct emac_phy_ops emac_sgmii_ops = {
+	.config			= emac_sgmii_config,
+	.up			= emac_sgmii_up,
+	.down			= emac_sgmii_down,
+	.reset			= emac_sgmii_reset,
+	.link_setup_no_ephy	= emac_sgmii_link_setup_no_ephy,
+	.link_check_no_ephy	= emac_sgmii_link_check_no_ephy,
+	.tx_clk_set_rate	= emac_sgmii_tx_clk_set_rate_nop,
+	.periodic_task		= emac_sgmii_periodic_check,
+};
