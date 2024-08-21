@@ -1234,7 +1234,7 @@ static irqreturn_t emac_isr(int _irq, void *data)
 		}
 
 		if (status & ISR_OVER)
-			emac_warn(adpt, intr, "TX/RX overflow status 0x%lx\n",
+			emac_dbg(adpt, intr, "TX/RX overflow status 0x%lx\n",
 				  status & ISR_OVER);
 
 		/* link event */

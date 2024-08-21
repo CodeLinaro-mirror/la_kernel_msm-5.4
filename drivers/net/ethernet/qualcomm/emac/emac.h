@@ -275,7 +275,7 @@ struct emac_hw {
 	netif_warn(_adpt, _mlevel, _adpt->netdev, _format, ##__VA_ARGS__)
 
 #define emac_dbg(_adpt, _mlevel, _format, ...) \
-	netif_warn(_adpt, _mlevel, _adpt->netdev, _format, ##__VA_ARGS__)
+	netif_dbg(_adpt, _mlevel, _adpt->netdev, _format, ##__VA_ARGS__)
 
 #define EMAC_VLAN_TO_TAG(_vlan, _tag) \
 		(_tag =  ((((_vlan) >> 8) & 0xFF) | (((_vlan) & 0xFF) << 8)))
