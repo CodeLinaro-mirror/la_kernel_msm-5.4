@@ -251,6 +251,8 @@ int emac_reinit_locked(struct emac_adapter *adpt)
 	pm_runtime_put_autosuspend(netdev->dev.parent);
 
 	CLR_FLAG(adpt, ADPT_STATE_RESETTING);
+	emac_phy_down(adpt);
+	emac_phy_up(adpt);
 	return ret;
 }
 
@@ -1911,6 +1913,11 @@ link_task_done:
 	CLR_FLAG(adpt, ADPT_STATE_RESETTING);
 }
 
+void emac_phy_up(struct emac_adapter *adpt)
+{
+	phy_start(adpt->phydev);
+}
+
 /* Bringup the interface/HW */
 int emac_mac_up(struct emac_adapter *adpt)
 {
@@ -1981,7 +1988,6 @@ int emac_mac_up(struct emac_adapter *adpt)
 	linkmode_mod_bit(SUPPORTED_Asym_Pause, adpt->phydev->advertising, 1);
 
 	adpt->phydev->irq = PHY_POLL;
-	phy_start(adpt->phydev);
 
 	emac_napi_enable_all(adpt);
 	netif_start_queue(netdev);
@@ -2001,6 +2007,11 @@ err_request_irq:
 	return ret;
 }
 
+void emac_phy_down(struct emac_adapter *adpt)
+{
+	phy_stop(adpt->phydev);
+}
+
 /* Bring down the interface/HW */
 void emac_mac_down(struct emac_adapter *adpt, u32 ctrl)
 {
@@ -2016,8 +2027,6 @@ void emac_mac_down(struct emac_adapter *adpt, u32 ctrl)
 
 	netif_stop_queue(netdev);
 	emac_napi_disable_all(adpt);
-
-	phy_stop(adpt->phydev);
 
 	/* Interrupts must be disabled before the PHY is disconnected, to
 	 * avoid a race condition where adjust_link is null when we get
@@ -2073,6 +2082,7 @@ static int emac_open(struct net_device *netdev)
 
 	pm_runtime_get_sync(netdev->dev.parent);
 	retval = emac_mac_up(adpt);
+	emac_phy_up(adpt);
 	pm_runtime_mark_last_busy(netdev->dev.parent);
 	pm_runtime_put_autosuspend(netdev->dev.parent);
 	if (retval)
@@ -2125,9 +2135,10 @@ static int emac_close(struct net_device *netdev)
 		disable_irq_wake(adpt->irq[EMAC_WOL_IRQ].irq);
 	}
 
-	if (!TEST_FLAG(adpt, ADPT_STATE_DOWN))
+	if (!TEST_FLAG(adpt, ADPT_STATE_DOWN)) {
 		emac_mac_down(adpt, EMAC_HW_CTRL_RESET_MAC);
-	else
+		emac_phy_down(adpt);
+	} else
 		emac_hw_reset_mac(hw);
 
 	if (TEST_FLAG(hw, HW_PTP_CAP))
@@ -2910,6 +2921,7 @@ static int emac_pm_suspend(struct device *device, bool wol_enable)
 			msleep(EMAC_ADPT_RESET_WAIT_TIME);
 
 		emac_mac_down(adpt, 0);
+		emac_phy_down(adpt);
 
 		CLR_FLAG(adpt, ADPT_STATE_RESETTING);
 	}
@@ -2983,6 +2995,7 @@ static int emac_pm_resume(struct device *device)
 		retval = emac_mac_up(adpt);
 		if (retval)
 			goto error;
+		emac_phy_up(adpt);
 	}
 	return 0;
 error:
@@ -3435,6 +3448,7 @@ static int emac_remove(struct platform_device *pdev)
 
 	if (netif_running(netdev)) {
 		emac_mac_down(adpt, 0);
+		emac_phy_down(adpt);
 	}
 
 	/* Disable EPHY WOL interrupt in suspend */
