@@ -1176,8 +1176,6 @@ static irqreturn_t emac_wol_isr(int irq, void *data)
 	if (!pm_runtime_status_suspended(adpt->netdev->dev.parent)) {
 		if (val)
 			emac_wol_gpio_irq(adpt, false);
-		if (ret & WOL_INT)
-			__pm_stay_awake(adpt->link_wlock);
 	}
 	return IRQ_HANDLED;
 }
@@ -1844,7 +1842,11 @@ static void emac_adjust_link(struct net_device *netdev)
 
 	if (!TEST_FLAG(adpt, ADPT_TASK_LSC_REQ))
 		return;
-//	CLR_FLAG(adpt, ADPT_TASK_LSC_REQ);
+
+	CLR_FLAG(adpt, ADPT_TASK_LSC_REQ);
+
+	if(TEST_FLAG(adpt, ADPT_TASK_SUSPEND_REQ))
+		return;
 
         if(TEST_FLAG(adpt, ADPT_TASK_CLOSE_REQ))
 		return;
@@ -1884,11 +1886,6 @@ static void emac_adjust_link(struct net_device *netdev)
 		/* Acquire resources */
 		pm_runtime_get_sync(netdev->dev.parent);
 
-		/* Acquire wake lock if link is detected to avoid device going
-		 * into suspend
-		 */
-		__pm_stay_awake(adpt->link_wlock);
-
 		phy->ops.tx_clk_set_rate(adpt);
 
 		emac_hw_start_mac(hw);
@@ -1898,9 +1895,6 @@ static void emac_adjust_link(struct net_device *netdev)
 			goto link_task_done;
 
 		emac_hw_stop_mac(hw);
-
-		/* Release wake lock if link is disconnected */
-		__pm_relax(adpt->link_wlock);
 
 		pm_runtime_mark_last_busy(netdev->dev.parent);
 		pm_runtime_put_autosuspend(netdev->dev.parent);
@@ -2900,13 +2894,6 @@ static int emac_pm_suspend(struct device *device, bool wol_enable)
 	struct emac_phy *phy = &adpt->phy;
 	u32 wufc = adpt->wol;
 
-	/* Check link state. Don't suspend if link is up */
-	if (netif_carrier_ok(adpt->netdev) && !(adpt->wol & EMAC_WOL_MAGIC))
-		return -EPERM;
-
-	/* cannot suspend if WOL interrupt is not enabled */
-	if (!adpt->irq[EMAC_WOL_IRQ].irq)
-		return -EPERM;
 
 	if (netif_running(netdev)) {
 		/* ensure no task is running and no reset is in progress */
@@ -2914,8 +2901,11 @@ static int emac_pm_suspend(struct device *device, bool wol_enable)
 			/* Reset might take few 10s of ms */
 			msleep(EMAC_ADPT_RESET_WAIT_TIME);
 
+		SET_FLAG(adpt, ADPT_TASK_SUSPEND_REQ);
+
 		emac_mac_down(adpt, 0);
 
+		CLR_FLAG(adpt, ADPT_TASK_SUSPEND_REQ);
 		CLR_FLAG(adpt, ADPT_STATE_RESETTING);
 	}
 
@@ -3042,7 +3032,6 @@ static int emac_pm_sys_suspend(struct device *device)
 		}
 		pm_runtime_disable(netdev->dev.parent);
 		pm_runtime_set_suspended(netdev->dev.parent);
-		pm_runtime_enable(netdev->dev.parent);
 
 		/* Clear the Magic packet flag */
 		adpt->wol &= ~EMAC_WOL_MAGIC;
@@ -3366,12 +3355,10 @@ static int emac_probe(struct platform_device *pdev)
 	skb_queue_head_init(&adpt->hwtxtstamp_pending_queue);
 	skb_queue_head_init(&adpt->hwtxtstamp_ready_queue);
 	INIT_WORK(&adpt->hwtxtstamp_task, emac_hwtxtstamp_task_routine);
-	adpt->link_wlock = wakeup_source_register(&pdev->dev, dev_name(&pdev->dev));
 
 	SET_FLAG(hw, HW_VLANSTRIP_EN);
 	SET_FLAG(adpt, ADPT_STATE_DOWN);
 	strlcpy(netdev->name, "eth%d", sizeof(netdev->name));
-
 
 	/* if  !CONFIG_PM_RUNTIME then enable all the resources here and mange
 	 * resources from system suspend/resume callbacks
@@ -3451,8 +3438,6 @@ static int emac_remove(struct platform_device *pdev)
 
 	for (i = 0; i < adpt->num_rxques; i++)
 		netif_napi_del(&adpt->rx_queue[i].napi);
-
-	wakeup_source_unregister(adpt->link_wlock);
 
 	if (TEST_FLAG(hw, HW_PTP_CAP))
 		emac_ptp_remove(netdev);
