@@ -1842,10 +1842,12 @@ static void emac_adjust_link(struct net_device *netdev)
 
 	pr_err("************* PHY Reg dump END *************\n");
 
-	if (!TEST_FLAG(adpt, ADPT_TASK_LSC_REQ)) {
+	if (!TEST_FLAG(adpt, ADPT_TASK_LSC_REQ))
 		return;
-	}
 //	CLR_FLAG(adpt, ADPT_TASK_LSC_REQ);
+
+        if(TEST_FLAG(adpt, ADPT_TASK_CLOSE_REQ))
+		return;
 
 	/* ensure that no reset is in progress while link task is running */
 	while (TEST_N_SET_FLAG(adpt, ADPT_STATE_RESETTING))
@@ -2116,6 +2118,8 @@ static int emac_close(struct net_device *netdev)
 	struct emac_phy *phy = &adpt->phy;
 
 
+	SET_FLAG(adpt, ADPT_TASK_CLOSE_REQ);
+
 	pm_runtime_get_sync(netdev->dev.parent);
 
 	if (adpt->irq[EMAC_WOL_IRQ].irq) {
@@ -2138,6 +2142,7 @@ static int emac_close(struct net_device *netdev)
 
 	emac_free_all_rtx_descriptor(adpt);
 
+	CLR_FLAG(adpt, ADPT_TASK_CLOSE_REQ);
 	return 0;
 }
 
