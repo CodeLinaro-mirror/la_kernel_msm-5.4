@@ -187,6 +187,35 @@ int emac_phy_config_fc(struct emac_adapter *adpt)
 	return 0;
 }
 
+void emac_clear_phy_addr(struct emac_adapter *adpt)
+{
+	int i;
+	struct mii_bus *mii_bus;
+
+	if (!adpt) {
+		emac_err(adpt, "ADPT is NULL\n");
+		return;
+	}
+
+	if (!adpt->phydev) {
+		emac_err(adpt, "External phy is not up\n");
+		return;
+	}
+
+	mii_bus = adpt->mii_bus;
+	if (!mii_bus) {
+		emac_err(adpt, "mii_bus is NULL\n");
+		return;
+	}
+
+	for (i = 0; i < PHY_MAX_ADDR; i++) {
+		if (i == adpt->phydev->mdio.addr)
+			continue;
+
+		mii_bus->mdio_map[i] = NULL;
+	}
+}
+
 /* Configure the MDIO bus and connect the external PHY */
 int emac_phy_config_external(struct platform_device *pdev,
 			     struct emac_adapter *adpt)
