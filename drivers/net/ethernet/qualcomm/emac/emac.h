@@ -677,6 +677,7 @@ struct emac_adapter {
 	struct emac_hw_stats		hw_stats;
 	int irq_status;
 
+	struct dentry *debugfs_dir;
 	struct emac_irq_per_dev		irq[EMAC_IRQ_CNT];
 	unsigned int			gpio[EMAC_GPIO_CNT];
 	struct emac_clk			clk[EMAC_CLK_CNT];

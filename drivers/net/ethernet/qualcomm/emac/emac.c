@@ -3199,26 +3199,27 @@ static int emac_create_debugfs(struct emac_adapter *adpt)
 {
 	static struct dentry *phy_reg_rw;
 	char dir_name[32];
-	struct dentry *debugfs_dir;
-
 
 	snprintf(dir_name, sizeof(dir_name), "%s%d", "eth", 0);
 
-	debugfs_dir = debugfs_create_dir(dir_name, NULL);
-	if (!debugfs_dir || IS_ERR(debugfs_dir)) {
+	 adpt->debugfs_dir = debugfs_create_dir(dir_name, NULL);
+	if (!adpt->debugfs_dir || IS_ERR(adpt->debugfs_dir)) {
 		pr_err("Can't create debugfs dir\n");
 		return -1;
 	}
 
 	phy_reg_rw = debugfs_create_file("phy_reg_rw", 0400,
-			debugfs_dir, adpt,
+			adpt->debugfs_dir, adpt,
 			&fops_phy_reg_rw);
 	if (!phy_reg_rw || IS_ERR(phy_reg_rw)) {
 		pr_err("Can't create phy_reg_rw %d\n", (long)phy_reg_rw);
-		return -1;
+		goto fail;
 	}
 
 	return 0;
+fail:
+	debugfs_remove_recursive(adpt->debugfs_dir);
+	return -1;
 }
 
 /* Probe function */
@@ -3447,6 +3448,7 @@ static int emac_remove(struct platform_device *pdev)
 	emac_disable_regulator(adpt, EMAC_VREG1, EMAC_VREG5);
 	msm_emac_clk_path_teardown(adpt);
 
+	debugfs_remove_recursive(adpt->debugfs_dir);
 	if (!ACPI_COMPANION(&pdev->dev))
 		put_device(&adpt->phydev->mdio.dev);
 
