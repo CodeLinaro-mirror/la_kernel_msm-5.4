@@ -539,7 +539,7 @@ static ssize_t emac_ptp_sysfs_tstamp_set(struct device *dev,
 {
 	struct emac_adapter *adpt = netdev_priv(to_net_dev(dev));
 	struct timespec ts;
-	int ret;
+	int ret = 0;
 
 	getnstimeofday(&ts);
 	if (adpt != NULL)
