@@ -10,6 +10,7 @@
 #include <linux/netdevice.h>
 #include <linux/clk.h>
 #include <linux/platform_device.h>
+#include <linux/interconnect.h>
 
 #include "emac-phy.h"
 
@@ -667,6 +668,25 @@ struct emac_tx_queue {
 
 #define GET_TPD_BUFFER(_tque, _i)    (&((_tque)->tpd.tpbuff[(_i)]))
 
+struct emac_icc_data {
+	const char *name;
+	u32 average_bandwidth;
+	u32 peak_bandwidth;
+};
+
+static struct emac_icc_data emac_axi_icc_data[] = {
+	{
+		.name = "EMAC_link_up",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 0,
+	},
+	{
+		.name = "EMAC_link_down",
+		.average_bandwidth = 800000,
+		.peak_bandwidth = 800000,
+	},
+};
+
 /* driver private data structure */
 struct emac_adapter {
 	struct net_device		*netdev;
@@ -732,6 +752,8 @@ struct emac_adapter {
 
 	u32       bus_cl_hdl;
 	struct msm_bus_scale_pdata *bus_scale_table;
+	struct icc_path *axi_icc_path;
+	struct emac_icc_data *emac_axi_icc;
 };
 
 static inline struct emac_adapter *emac_hw_get_adap(struct emac_hw *hw)
