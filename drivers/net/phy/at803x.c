@@ -256,7 +256,8 @@ static int at803x_probe(struct phy_device *phydev)
 
 static int at803x_config_init(struct phy_device *phydev)
 {
-	int ret;
+	int ret = 0;
+	int ccr = 0;
 
 	/* The RX and TX delay default is:
 	 *   after HW reset: RX delay enabled and TX delay disabled
@@ -277,6 +278,24 @@ static int at803x_config_init(struct phy_device *phydev)
 	else
 		ret = at803x_disable_tx_delay(phydev);
 
+	if (phydev->interface == PHY_INTERFACE_MODE_SGMII) {
+		ccr = phy_read(phydev, AT803X_REG_CHIP_CONFIG);
+		if ((ccr & AT803X_MODE_CFG_MASK) != AT803X_MODE_CFG_SGMII) {
+
+			/* switch to SGMII/fiber page */
+			phy_write(phydev, AT803X_REG_CHIP_CONFIG, ccr & ~AT803X_BT_BX_REG_SEL);
+			ccr |= AT803X_MODE_CFG_SGMII;
+
+			/* Enable SGMII mode on fiber page */
+			phy_write(phydev, AT803X_REG_CHIP_CONFIG, ccr);
+
+			/* switch back to copper page */
+			phy_write(phydev, AT803X_REG_CHIP_CONFIG, ccr | AT803X_BT_BX_REG_SEL);
+
+			/* Enable SGMII mode on copper page */
+			phy_write(phydev, AT803X_REG_CHIP_CONFIG, ccr);
+		}
+	}
 	return ret;
 }
 
