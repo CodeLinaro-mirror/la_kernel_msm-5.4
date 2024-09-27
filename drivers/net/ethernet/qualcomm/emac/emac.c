@@ -1087,14 +1087,14 @@ static int emac_start_xmit_frame(struct emac_adapter *adpt,
 		return NETDEV_TX_OK;
 	}
 
-	/*if (vlan_tx_tag_present(skb)) {
-		u16 vlan = vlan_tx_tag_get(skb);
+	if (skb_vlan_tag_present(skb)) {
+		u16 vlan = skb_vlan_tag_get(skb);
 		u16 tag;
 
 		EMAC_VLAN_TO_TAG(vlan, tag);
 		stpd.genr.cvlan_tag = tag;
 		stpd.genr.ins_cvtag = 0x1;
-	}  depricated API of kernel 3.18 */
+	}
 
 	if (vlan_get_tag(skb, &tci)) {
 		stpd.genr.cvlan_tag = tci;
