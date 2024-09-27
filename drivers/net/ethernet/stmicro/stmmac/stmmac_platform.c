@@ -604,6 +604,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, const char **mac)
 	}
 	clk_prepare_enable(plat->pclk);
 
+#ifdef CONFIG_PTPSUPPORT_OBJ
 	/* Fall-back to main clock in case of no PTP ref is passed */
 	plat->clk_ptp_ref = devm_clk_get(&pdev->dev, "ptp_ref");
 	if (IS_ERR(plat->clk_ptp_ref)) {
@@ -624,6 +625,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, const char **mac)
 				 "snps,ptp-req-clk-rate",
 				 &plat->clk_ptp_req_rate))
 		plat->clk_ptp_req_rate = 96000000;
+#endif
 
 	plat->stmmac_rst = devm_reset_control_get(&pdev->dev,
 						  STMMAC_RESOURCE_NAME);
