@@ -3449,6 +3449,7 @@ static int emac_remove(struct platform_device *pdev)
 	if (phy->is_wol_irq_reg)
 		emac_wol_gpio_irq(adpt, false);
 
+	emac_clear_phy_addr(adpt);
 	mdiobus_unregister(adpt->mii_bus);
 	unregister_netdev(netdev);
 

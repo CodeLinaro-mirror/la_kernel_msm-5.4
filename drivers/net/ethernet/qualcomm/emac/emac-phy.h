@@ -81,4 +81,5 @@ int emac_phy_check_link(struct emac_adapter *adpt, u32 *speed, bool *link_up);
 int emac_phy_get_lpa_speed(struct emac_adapter *adpt, u32 *speed);
 int emac_phy_config_fc(struct emac_adapter *adpt);
 void emac_phy_reset_external(struct emac_adapter *adpt);
+void emac_clear_phy_addr(struct emac_adapter *adpt);
 #endif /* __EMAC_PHY_H__ */
