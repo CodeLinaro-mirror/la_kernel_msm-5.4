@@ -54,6 +54,9 @@
 #define EMAC_RFDESC_SIZE      2
 #define EMAC_RSS_IDT_SIZE     256
 
+#define EMAC_DOWN_VOTE_IDX    0
+#define EMAC_UP_VOTE_IDX      1
+
 #define EMAC_SKB_CB(skb) ((struct emac_skb_cb *)(skb)->cb)
 
 #define EMAC_PINCTRL_STATE_MDIO_ACTIVE_CLK "emac_mdio_active_clk"
@@ -1822,9 +1825,10 @@ static void emac_adjust_link(struct net_device *netdev)
 	struct emac_phy *phy = &adpt->phy;
 	struct emac_hw *hw = &adpt->hw;
 	bool status_changed = false;
-
+	int vote_idx = 0;
 	int phydata = 0;
 	int i = 0;
+	int ret = 0;
 
 	if (!phydev)
 		return;
@@ -1891,16 +1895,28 @@ static void emac_adjust_link(struct net_device *netdev)
 		phy->ops.tx_clk_set_rate(adpt);
 
 		emac_hw_start_mac(hw);
+		vote_idx = EMAC_UP_VOTE_IDX;
 	} else {
 		/* done if nothing has changed */
 		if (!status_changed)
 			goto link_task_done;
 
 		emac_hw_stop_mac(hw);
+		vote_idx = EMAC_DOWN_VOTE_IDX;
 
 		pm_runtime_mark_last_busy(netdev->dev.parent);
 		pm_runtime_put_autosuspend(netdev->dev.parent);
 	}
+
+	if (adpt->axi_icc_path && adpt->emac_axi_icc) {
+		ret = icc_set_bw(adpt->axi_icc_path,
+				 adpt->emac_axi_icc[vote_idx].average_bandwidth,
+				 adpt->emac_axi_icc[vote_idx].peak_bandwidth);
+
+		if (ret)
+			emac_dbg(adpt, probe, "Interconnect set BW failed for Emac->Axi path\n");
+	}
+
 
 	if (status_changed)
 		phy_print_status(phydev);
@@ -3345,6 +3361,12 @@ static int emac_probe(struct platform_device *pdev)
 	/* reset mac */
 	emac_hw_reset_mac(hw);
 
+	adpt->axi_icc_path = of_icc_get(&pdev->dev, "axi_icc_path");
+	if (!adpt->axi_icc_path || IS_ERR(adpt->axi_icc_path)) {
+		adpt->emac_axi_icc = NULL;
+	} else {
+		adpt->emac_axi_icc = emac_axi_icc_data;
+	}
 
 	/* set hw features */
 	netdev->features = NETIF_F_SG | NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
