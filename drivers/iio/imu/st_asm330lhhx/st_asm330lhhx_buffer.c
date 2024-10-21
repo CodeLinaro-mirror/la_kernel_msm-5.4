@@ -568,8 +568,10 @@ int st_asm330lhhx_update_fifo(struct iio_dev *iio_dev, bool enable)
 		if (err < 0)
 			goto out;
 
-		/* power up, wait 100 ms for stable output */
-		msleep(100);
+		if (sensor->id == ST_ASM330LHHX_ID_GYRO && enable){
+			/* power up, wait 100 ms for stable output */
+			msleep(100);
+		}
 
 		err = st_asm330lhhx_set_sensor_batching_odr(sensor,
 							    enable);
