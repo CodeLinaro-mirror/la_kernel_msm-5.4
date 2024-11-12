@@ -3562,6 +3562,9 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct ethhdr *eth_header = NULL;
 	unsigned short eth_type = 0;
 #endif
+	int tx_packets = 0;
+	bool set_ic = false;
+
 	tx_q = &priv->tx_queue[queue];
 
 	if (priv->tx_path_in_lpi_mode)
@@ -3656,12 +3659,18 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 	 * This approach takes care about the fragments: desc is the first
 	 * element in case of no SG.
 	 */
+	tx_packets = entry + 1 - first_entry;
 	tx_q->tx_count_frames += nfrags + 1;
 	if (likely(priv->tx_coal_timer_disable)) {
 		if (priv->plat->get_plat_tx_coal_frames) {
 			int_mod = priv->plat->get_plat_tx_coal_frames(skb);
-
-			if (!(tx_q->cur_tx % int_mod)) {
+			if (tx_packets > int_mod)
+				set_ic = true;
+			else if ((tx_q->tx_count_frames % int_mod) < tx_packets)
+				set_ic = true;
+			else
+				set_ic = false;
+			if (set_ic) {
 				tx_q->tx_count_frames = 0;
 				stmmac_set_tx_ic(priv, desc);
 				priv->xstats.tx_set_ic_bit++;
