@@ -1992,12 +1992,6 @@ int emac_mac_up(struct emac_adapter *adpt)
 	phy->link_speed = SPEED_UNKNOWN;
 	phy->link_pause = 0;
 
-	/* Enable pause frames. */
-	linkmode_mod_bit(SUPPORTED_Pause, adpt->phydev->supported, 1);
-	linkmode_mod_bit(SUPPORTED_Asym_Pause, adpt->phydev->supported, 1);
-	linkmode_mod_bit(SUPPORTED_Pause, adpt->phydev->advertising, 1);
-	linkmode_mod_bit(SUPPORTED_Asym_Pause, adpt->phydev->advertising, 1);
-
 	adpt->phydev->irq = PHY_POLL;
 
 	emac_napi_enable_all(adpt);
