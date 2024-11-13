@@ -1826,25 +1826,10 @@ static void emac_adjust_link(struct net_device *netdev)
 	struct emac_hw *hw = &adpt->hw;
 	bool status_changed = false;
 	int vote_idx = 0;
-	int phydata = 0;
-	int i = 0;
 	int ret = 0;
 
-	if (!phydev)
+	if (!phydev || !adpt)
 		return;
-
-	if (!adpt || !adpt->mii_bus)
-		return;
-
-	pr_err("************* PHY Reg dump *************\n");
-
-	for (i = 0; i < 32; i++) {
-		phydata = adpt->mii_bus->read(adpt->mii_bus,  phydev->mdio.addr, i);
-		pr_err("MII Register (%#x) = %#x\n",
-				i, phydata);
-	}
-
-	pr_err("************* PHY Reg dump END *************\n");
 
 	if (!TEST_FLAG(adpt, ADPT_TASK_LSC_REQ))
 		return;
