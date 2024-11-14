@@ -805,7 +805,10 @@ static int phy_handle_interrupt(struct phy_device *phydev)
 static irqreturn_t phy_interrupt(int irq, void *phy_dat)
 {
 	struct phy_device *phydev = phy_dat;
-
+	if(!phydev->attached_dev) {
+		pr_err("phy_interrupt attached_dev NULL %d\n", __LINE__);
+		return IRQ_NONE;
+	}
 	if (phydev->drv->did_interrupt && !phy_did_interrupt(phydev))
 		return IRQ_NONE;
 

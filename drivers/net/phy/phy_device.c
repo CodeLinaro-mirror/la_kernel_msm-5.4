@@ -917,6 +917,10 @@ EXPORT_SYMBOL(phy_find_first);
 static void phy_link_change(struct phy_device *phydev, bool up, bool do_carrier)
 {
 	struct net_device *netdev = phydev->attached_dev;
+	if(!netdev) {
+		pr_err("phy_link_change attached_dev NULL %d\n", __LINE__);
+		return;
+	}
 
 	if (do_carrier) {
 		if (up)
