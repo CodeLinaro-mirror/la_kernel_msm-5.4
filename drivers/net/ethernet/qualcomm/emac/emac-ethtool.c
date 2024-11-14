@@ -67,11 +67,14 @@ static const char *const emac_ethtool_stat_strings[] = {
 static void emac_get_pauseparam(struct net_device *netdev,
 				struct ethtool_pauseparam *pause)
 {
+	struct emac_adapter *adpt = netdev_priv(netdev);
 	struct phy_device *phydev = netdev->phydev;
 
+	if(!adpt->mac2mac_en){
 	pause->autoneg = (phydev->autoneg) ? AUTONEG_ENABLE : AUTONEG_DISABLE;
 	pause->rx_pause = (phydev->pause) ? 1 : 0;
 	pause->tx_pause = (phydev->pause != phydev->asym_pause) ? 1 : 0;
+	}
 }
 
 static int emac_set_pauseparam(struct net_device *netdev,
@@ -87,7 +90,7 @@ static int emac_set_pauseparam(struct net_device *netdev,
 	if (!netif_running(netdev))
 		return -EINVAL;
 
-	if (!phydev)
+	if (!phydev && !adpt->mac2mac_en)
 		return -ENODEV;
 
 	req_fc_mode        = phy->req_fc_mode;
@@ -113,7 +116,8 @@ static int emac_set_pauseparam(struct net_device *netdev,
 
 	pm_runtime_get_sync(netdev->dev.parent);
 
-	if ((phy->req_fc_mode != req_fc_mode) ||
+	if (!adpt->mac2mac_en &&
+		(phy->req_fc_mode != req_fc_mode) ||
 	    (phy->disable_fc_autoneg != disable_fc_autoneg)) {
 		phy->req_fc_mode	= req_fc_mode;
 		phy->disable_fc_autoneg	= disable_fc_autoneg;
@@ -242,8 +246,9 @@ static int emac_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 	if (emac_wol_exclusion(adpt, wol))
 		return wol->wolopts ? -EOPNOTSUPP : 0;
 
-	/* Enable WOL interrupt */
-	ret = phy_ethtool_set_wol(phydev, wol);
+	if(!adpt->mac2mac_en)
+		/* Enable WOL interrupt */
+		ret = phy_ethtool_set_wol(phydev, wol);
 	if (ret)
 		return ret;
 
@@ -407,10 +412,31 @@ static u32 emac_get_priv_flags(struct net_device *netdev)
 	return adpt->single_pause_mode ? EMAC_PRIV_ENABLE_SINGLE_PAUSE : 0;
 }
 
+static int ethtool_get_link_ksettings(struct net_device *dev,
+  					     struct ethtool_link_ksettings *cmd)
+{
+	struct emac_adapter *adpt = netdev_priv(dev);
+
+	if(!adpt->mac2mac_en)
+		return phy_ethtool_get_link_ksettings(dev,cmd);
+	else
+		return 0;
+}
+
+static int ethtool_set_link_ksettings(struct net_device *dev,
+  				    const struct ethtool_link_ksettings *cmd)
+{
+	struct emac_adapter *adpt = netdev_priv(dev);
+
+	if(!adpt->mac2mac_en)
+		return phy_ethtool_set_link_ksettings(dev,cmd);
+	else
+		return 0;
+}
 
 static const struct ethtool_ops emac_ethtool_ops = {
-	.get_link_ksettings = phy_ethtool_get_link_ksettings,
-	.set_link_ksettings = phy_ethtool_set_link_ksettings,
+	.get_link_ksettings = ethtool_get_link_ksettings,
+	.set_link_ksettings = ethtool_set_link_ksettings,
 
 	.get_msglevel    = emac_get_msglevel,
 	.set_msglevel    = emac_set_msglevel,

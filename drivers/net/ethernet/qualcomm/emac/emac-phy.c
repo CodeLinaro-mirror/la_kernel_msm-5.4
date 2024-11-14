@@ -214,11 +214,13 @@ void emac_clear_phy_addr(struct emac_adapter *adpt)
 		return;
 	}
 
-	for (i = 0; i < PHY_MAX_ADDR; i++) {
-		if (i == adpt->phydev->mdio.addr)
-			continue;
+	if(!adpt->mac2mac_en){
+		for (i = 0; i < PHY_MAX_ADDR; i++) {
+			if (i == adpt->phydev->mdio.addr)
+				continue;
 
-		mii_bus->mdio_map[i] = NULL;
+			mii_bus->mdio_map[i] = NULL;
+		}
 	}
 }
 
