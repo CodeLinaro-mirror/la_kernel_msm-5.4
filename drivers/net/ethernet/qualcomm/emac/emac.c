@@ -2585,6 +2585,7 @@ static int emac_clks_phase2_init(struct emac_adapter *adpt)
 
 	retval = emac_clk_prepare_enable(adpt, EMAC_CLK_SYS);
 
+	adpt->clks_suspended = false;
 	return retval;
 }
 
@@ -2592,7 +2593,7 @@ static int emac_clks_phase2_init(struct emac_adapter *adpt)
 static void emac_disable_clks(struct emac_adapter *adpt)
 {
 	u8 i;
-
+	adpt->clks_suspended = true;
 	for (i = 0; i < EMAC_CLK_CNT; i++) {
 		struct emac_clk *clk = &adpt->clk[EMAC_CLK_CNT - i - 1];
 

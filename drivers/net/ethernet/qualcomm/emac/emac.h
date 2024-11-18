@@ -755,6 +755,7 @@ struct emac_adapter {
 	struct msm_bus_scale_pdata *bus_scale_table;
 	struct icc_path *axi_icc_path;
 	struct emac_icc_data *emac_axi_icc;
+	bool clks_suspended;
 };
 
 static inline struct emac_adapter *emac_hw_get_adap(struct emac_hw *hw)

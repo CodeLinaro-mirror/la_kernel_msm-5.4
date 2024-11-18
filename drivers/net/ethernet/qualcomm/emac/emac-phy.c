@@ -89,9 +89,13 @@ static int emac_mdio_read(struct mii_bus *bus, int addr, int regnum)
 	emac_reg_w32(hw, EMAC, EMAC_MDIO_CTRL, reg);
 	mb(); /* ensure hw starts the operation before we check for result */
 
+	/* If clocks are suspended no register access should happen */
+	if(adpt->clks_suspended) {
+		return -EIO;
+	}
 	if (readl_poll_timeout(hw->reg_addr[EMAC] + EMAC_MDIO_CTRL, reg,
 			       !(reg & (MDIO_START | MDIO_BUSY)),
-			       100, MDIO_WAIT_TIMES * 100)) {
+			       100, MDIO_WAIT_TIMES * 10)) {
 		emac_err(adpt, "error reading phy addr %d phy reg 0x%02x\n",
 			 addr, regnum);
 		ret = -EIO;
@@ -112,7 +116,7 @@ static int emac_mdio_write(struct mii_bus *bus, int addr, int regnum, u16 val)
 	struct emac_phy *phy = &adpt->phy;
 	u32 reg = 0;
 	int ret = 0;
-	
+
 /*	if (pm_runtime_enabled(adpt->netdev->dev.parent) &&
 	    pm_runtime_status_suspended(adpt->netdev->dev.parent)) {
 		emac_dbg(adpt, hw, "EMAC in suspended state\n");
@@ -133,9 +137,13 @@ static int emac_mdio_write(struct mii_bus *bus, int addr, int regnum, u16 val)
 	emac_reg_w32(hw, EMAC, EMAC_MDIO_CTRL, reg);
 	mb(); /* ensure hw starts the operation before we check for result */
 
+	/* If clocks are suspended no register access should happen */
+	if(adpt->clks_suspended) {
+		return -EIO;
+	}
 	if (readl_poll_timeout(hw->reg_addr[EMAC] + EMAC_MDIO_CTRL, reg,
 			       !(reg & (MDIO_START | MDIO_BUSY)), 100,
-			       MDIO_WAIT_TIMES * 100)) {
+			       MDIO_WAIT_TIMES * 10)) {
 		emac_err(adpt, "error writing phy addr %d phy reg 0x%02x data 0x%02x\n",
 			 addr, regnum, val);
 		ret = -EIO;
