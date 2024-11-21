@@ -131,7 +131,6 @@ struct lt9611 {
 	bool hpd_status;
 	bool bridge_attach;
 	bool pending_edid;
-	bool hpd_trigger;
 	bool hpd_support;
 	enum lt9611_fw_upgrade_status fw_status;
 
@@ -1251,10 +1250,6 @@ static irqreturn_t lt9611_irq_thread_handler(int irq, void *dev_id)
 			pr_info("irq status 0x%x\n", irq_status);
 			pdata->hpd_status = irq_status & BIT(1);
 			pdata->edid_status = irq_status & BIT(0);
-			if (pdata->hpd_status)
-				pdata->hpd_trigger = true;
-			else
-				pdata->hpd_trigger = false;
 		} else {
 			pr_err("invalid irq\n");
 		}
@@ -1768,8 +1763,7 @@ static int lt9611_connector_get_modes(struct drm_connector *connector)
 		pdata->edid_complete = false;
 		mutex_unlock(&pdata->lock);
 		goto read_edid;
-	} else if (!pdata->edid_status && pdata->hpd_trigger) {
-		pdata->hpd_trigger = false;
+	} else if (!pdata->edid_status) {
 		mutex_unlock(&pdata->lock);
 		ret = wait_event_timeout(pdata->edid_wq, pdata->edid_complete,
 				msecs_to_jiffies(EDID_TIMEOUT_MS));
@@ -2210,15 +2204,6 @@ static int lt9611_probe(struct i2c_client *client,
 		goto err_sysfs_init;
 	}
 
-	i2c_set_clientdata(client, pdata);
-	dev_set_drvdata(&client->dev, pdata);
-
-	ret = lt9611_sysfs_init(&client->dev);
-	if (ret) {
-		pr_err("sysfs init failed\n");
-		goto err_sysfs_init;
-	}
-
 	chip_version = lt9611_get_version(pdata);
 	pdata->hpd_support = false;
 	if (chip_version) {
@@ -2240,13 +2225,6 @@ static int lt9611_probe(struct i2c_client *client,
 	mutex_init(&pdata->lock);
 	init_waitqueue_head(&pdata->edid_wq);
 
-#if IS_ENABLED(CONFIG_OF)
-	pdata->bridge.of_node = client->dev.of_node;
-#endif
-
-	pdata->bridge.funcs = &lt9611_bridge_funcs;
-	drm_bridge_add(&pdata->bridge);
-
 	pdata->wq = create_singlethread_workqueue("lt9611_wk");
 	if (!pdata->wq) {
 		pr_err("Error creating lt9611 wq\n");
@@ -2261,6 +2239,22 @@ static int lt9611_probe(struct i2c_client *client,
 		pr_err("failed to request irq\n");
 		goto err_i2c_prog;
 	}
+
+	i2c_set_clientdata(client, pdata);
+	dev_set_drvdata(&client->dev, pdata);
+
+	ret = lt9611_sysfs_init(&client->dev);
+	if (ret) {
+		pr_err("sysfs init failed\n");
+		goto err_sysfs_init;
+	}
+
+#if IS_ENABLED(CONFIG_OF)
+	pdata->bridge.of_node = client->dev.of_node;
+#endif
+
+	pdata->bridge.funcs = &lt9611_bridge_funcs;
+	drm_bridge_add(&pdata->bridge);
 
 	if (pdata->audio_support) {
 		pdata->audio_pdev =
