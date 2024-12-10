@@ -2997,12 +2997,12 @@ error:
 #ifdef CONFIG_PM_RUNTIME
 static int emac_pm_runtime_suspend(struct device *device)
 {
-	return emac_pm_suspend(device, true);
+	return 0;
 }
 
 static int emac_pm_runtime_resume(struct device *device)
 {
-	return emac_pm_resume(device);
+	return 0;
 }
 
 static int emac_pm_runtime_idle(struct device *device)
