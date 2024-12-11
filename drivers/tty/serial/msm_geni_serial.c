@@ -1664,7 +1664,7 @@ static void msm_geni_uart_gsi_xfer_tx(struct work_struct *work)
 		xmit_size = UART_XMIT_SIZE - xmit->tail;
 
 	if (!xmit_size || msm_port->tx_dma)
-		return;
+		goto exit_gsi_xfer;
 
 	dump_ipc(uport, msm_port->ipc_log_tx, "DMA Tx",
 		 (char *)&xmit->buf[xmit->tail], 0, xmit_size);
@@ -1673,7 +1673,7 @@ static void msm_geni_uart_gsi_xfer_tx(struct work_struct *work)
 	if (ret) {
 		dev_err(uport->dev, "%s: Allocation of Channel failed:%d\n",
 						__func__, ret);
-		return;
+		goto exit_gsi_xfer;
 	}
 	sg_init_table(msm_port->gsi->tx_sg, 3);
 	sg_set_buf(msm_port->gsi->tx_sg, &msm_port->gsi->tx_cfg0_t,
@@ -1696,7 +1696,7 @@ static void msm_geni_uart_gsi_xfer_tx(struct work_struct *work)
 		dev_err(uport->dev, "%s:Failed to allocate memory\n",
 							__func__);
 		msm_geni_deallocate_chan(uport);
-		return;
+		goto exit_gsi_xfer;
 	}
 	msm_port->gsi->tx_t.dword[0] =
 			MSM_GPI_DMA_W_BUFFER_TRE_DWORD0(msm_port->tx_dma);
@@ -1726,7 +1726,7 @@ static void msm_geni_uart_gsi_xfer_tx(struct work_struct *work)
 	if (dma_submit_error(tx_cookie)) {
 		pr_err("%s: dmaengine_submit failed (%d)\n", __func__, tx_cookie);
 		dmaengine_terminate_all(msm_port->gsi->tx_c);
-		return;
+		goto exit_gsi_xfer;
 	}
 	reinit_completion(&msm_port->tx_xfer);
 	dma_async_issue_pending(msm_port->gsi->tx_c);
@@ -1743,6 +1743,9 @@ exit_gsi_tx_xfer:
 	msm_geni_deallocate_chan(uport);
 	UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev,
 		     "%s: End\n", __func__);
+exit_gsi_xfer:
+	atomic_set(&msm_port->xfer_inprogress, 0);
+	UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev, "%s: TX aborted, End\n", __func__);
 }
 
 static void msm_geni_uart_gsi_cancel_tx(struct work_struct *work)
