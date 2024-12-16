@@ -2901,6 +2901,7 @@ static int emac_pm_suspend(struct device *device, bool wol_enable)
 	struct emac_hw *hw = &adpt->hw;
 	struct emac_phy *phy = &adpt->phy;
 	u32 wufc = adpt->wol;
+	int ret = 0;
 
 
 	if (netif_running(netdev)) {
@@ -2954,6 +2955,15 @@ static int emac_pm_suspend(struct device *device, bool wol_enable)
 
 	adpt->gpio_off(adpt, true, false);
 	msm_emac_clk_path_vote(adpt, EMAC_NO_PERF_VOTE);
+
+	if (adpt->axi_icc_path && adpt->emac_axi_icc) {
+		ret = icc_set_bw(adpt->axi_icc_path,
+				 adpt->emac_axi_icc[EMAC_DOWN_VOTE_IDX].average_bandwidth,
+				 adpt->emac_axi_icc[EMAC_DOWN_VOTE_IDX].peak_bandwidth);
+		if (ret)
+			emac_dbg(adpt, probe, "Interconnect set BW failed for Emac->Axi path\n");
+	}
+
 	return 0;
 }
 
@@ -3441,6 +3451,7 @@ static int emac_remove(struct platform_device *pdev)
 	struct emac_sgmii *sgmii = adpt->phy.private;
 	struct emac_phy *phy = &adpt->phy;
 	u32 i;
+	int ret = 0;
 
 	if (netif_running(netdev)) {
 		emac_mac_down(adpt, 0);
@@ -3465,6 +3476,14 @@ static int emac_remove(struct platform_device *pdev)
 	emac_disable_clks(adpt);
 	emac_disable_regulator(adpt, EMAC_VREG1, EMAC_VREG5);
 	msm_emac_clk_path_teardown(adpt);
+
+	if (adpt->axi_icc_path && adpt->emac_axi_icc) {
+		ret = icc_set_bw(adpt->axi_icc_path,
+				 adpt->emac_axi_icc[EMAC_DOWN_VOTE_IDX].average_bandwidth,
+				 adpt->emac_axi_icc[EMAC_DOWN_VOTE_IDX].peak_bandwidth);
+		if (ret)
+			emac_dbg(adpt, probe, "Interconnect set BW failed for Emac->Axi path\n");
+	}
 
 	debugfs_remove_recursive(adpt->debugfs_dir);
 	if (!ACPI_COMPANION(&pdev->dev))
