@@ -280,6 +280,9 @@
 
 #define DWC3_GUCTL1_L1_SUSP_THRLD_EN_FOR_HOST	BIT(8)
 
+/* Global User Control Register */
+#define DWC3_GUCTL_RESBWHSEPS		BIT(16)
+
 /* Global Status Register */
 #define DWC3_GSTS_OTG_IP	BIT(10)
 #define DWC3_GSTS_BC_IP		BIT(9)
@@ -1447,6 +1450,7 @@ struct dwc3 {
 	bool			ignore_statusirq;
 	u32			num_gsi_eps;
 	bool			normal_eps_in_gsi_mode;
+	bool			dwc3_guctl_resbwhseps_quirk;
 };
 
 #define INCRX_BURST_MODE 0
