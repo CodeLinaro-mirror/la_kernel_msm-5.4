@@ -2765,9 +2765,6 @@ static int ethqos_ipa_cv2x_offload_resume(struct qcom_ethqos *ethqos)
 		return ret;
 	}
 
-	if (!eth_ipa_ctx.ipa_offload_susp[type])
-		return ret;
-
 	if (eth_ipa_ctx.cv2x_queue_enabled)
 		return ret;
 
