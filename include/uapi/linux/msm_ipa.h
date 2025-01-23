@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  *
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023,2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _UAPI_MSM_IPA_H_
@@ -988,8 +988,13 @@ enum ipa_set_gw_ip_addr {
 #define IPA_SET_GW_IP_ADDR_EVENT_MAX IPA_SET_GW_IP_ADDR_EVENT_MAX
 };
 
+enum ipa_set_ext_prop_change_evt {
+	WAN_EXT_PROP_CHANGE_EVENT = IPA_SET_GW_IP_ADDR_EVENT_MAX,
+	WAN_EXT_PROP_CHANGE_EVENT_MAX
+#define WAN_EXT_PROP_CHANGE_EVENT_MAX WAN_EXT_PROP_CHANGE_EVENT_MAX
+};
 
-#define IPA_EVENT_MAX_NUM (IPA_SET_GW_IP_ADDR_EVENT_MAX)
+#define IPA_EVENT_MAX_NUM (WAN_EXT_PROP_CHANGE_EVENT_MAX)
 #define IPA_EVENT_MAX ((int)IPA_EVENT_MAX_NUM)
 
 /**
