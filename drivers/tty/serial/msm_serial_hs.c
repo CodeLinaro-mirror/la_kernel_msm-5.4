@@ -2404,6 +2404,17 @@ static irqreturn_t msm_hs_wakeup_isr(int irq, void *dev)
 
 	spin_lock_irqsave(&uport->lock, flags);
 
+	tty = uport->state->port.tty;
+	/* uport->state->port.tty pointer initialized as part of
+	 * UART port_open. Adding null check to ensure tty should
+	 * have a valid value before dereference it in wakeup_isr.
+	 */
+	if (!tty) {
+		MSM_HS_DBG("%s: Unexpected wakeup ISR\n", __func__);
+		spin_unlock_irqrestore(&uport->lock, flags);
+		return IRQ_HANDLED;
+	}
+
 	if (msm_uport->wakeup.ignore)
 		msm_uport->wakeup.ignore = 0;
 	else
@@ -2415,7 +2426,6 @@ static irqreturn_t msm_hs_wakeup_isr(int irq, void *dev)
 		 * optionally inject char into tty rx
 		 */
 		if (msm_uport->wakeup.inject_rx) {
-			tty = uport->state->port.tty;
 			tty_insert_flip_char(tty->port,
 					     msm_uport->wakeup.rx_to_inject,
 					     TTY_NORMAL);
@@ -2613,6 +2623,9 @@ static int msm_hs_startup(struct uart_port *uport)
 
 	tx->dma_base = dma_map_single(uport->dev, tx_buf->buf, UART_XMIT_SIZE,
 				      DMA_TO_DEVICE);
+
+	if (is_use_low_power_wakeup(msm_uport))
+		irq_set_irq_wake(msm_uport->wakeup.irq, 1);
 
 	/* turn on uart clk */
 	msm_hs_resource_vote(msm_uport);
@@ -3645,6 +3658,9 @@ static void msm_hs_shutdown(struct uart_port *uport)
 	struct circ_buf *tx_buf = &uport->state->xmit;
 	int data;
 	unsigned long flags;
+
+	if (is_use_low_power_wakeup(msm_uport))
+		irq_set_irq_wake(msm_uport->wakeup.irq, 0);
 
 	if (msm_uport->wakeup.enabled)
 		disable_irq(msm_uport->wakeup.irq);
