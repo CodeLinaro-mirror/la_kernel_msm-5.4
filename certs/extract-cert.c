@@ -23,8 +23,6 @@
 #include <openssl/err.h>
 #include <openssl/engine.h>
 
-#include "ssl-common.h"
-
 /*
  * OpenSSL 3.0 deprecates the OpenSSL's ENGINE API.
  *
