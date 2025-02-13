@@ -78,6 +78,23 @@ config ARCH_SDXNIGHTJAR
 	select QCOM_GDSC
 	select GENERIC_CLOCKEVENTS_BROADCAST
 
+config ARCH_MDM9650
+	bool "Enable support for MDM9650"
+	select CPU_V7
+	select ARM_GIC
+	select HAVE_ARM_ARCH_TIMER
+	select HAVE_PCI
+	select MSM_CORTEX_A7
+	select PCI
+	select PINCTRL
+	select QCOM_SCM if SMP
+	select MSM_JTAG_MM if CORESIGHT_ETM
+	select PM_DEVFREQ
+	select COMMON_CLK
+	select COMMON_CLK_QCOM
+	select QCOM_GDSC
+	select GENERIC_CLOCKEVENTS_BROADCAST
+
 config ARCH_MONACO
 	bool "Enable support for Qualcomm Technologies, Inc. MONACO"
 	select ARM_GIC
