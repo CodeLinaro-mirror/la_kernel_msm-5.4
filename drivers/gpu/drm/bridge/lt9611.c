@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2018, The Linux Foundation. All rights reserved.
  * Copyright (c) 2019. Linaro Ltd
- * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define DEBUG
@@ -34,6 +34,7 @@
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_print.h>
+#include <linux/pm.h>
 
 #define EDID_SEG_SIZE 256
 #define HPD_UEVENT_BUFFER_SIZE 32
@@ -633,6 +634,21 @@ static int lt9611_regulator_enable(struct lt9611 *lt9611)
 	}
 
 	return 0;
+}
+
+static int lt9611_regulator_disable(struct lt9611 *lt9611)
+{
+	int ret = 0;
+
+	ret = regulator_disable(lt9611->supplies[0].consumer);
+	if (ret)
+		pr_err("failed to disable lt9611 vdd regulator %d\n", ret);
+
+	ret = regulator_disable(lt9611->supplies[1].consumer);
+	if (ret)
+		pr_err("Failed to disable lt9611 vcc regulator %d\n", ret);
+
+	return ret;
 }
 
 static struct lt9611_mode *lt9611_find_mode(const struct drm_display_mode *mode)
@@ -1352,6 +1368,47 @@ err_disable_regulators:
 	return ret;
 }
 
+static int lt9611_pm_freeze(struct device *dev)
+{
+	struct lt9611 *lt9611;
+	int ret = 0;
+
+	if (!dev)
+		return -EINVAL;
+	lt9611 = dev_get_drvdata(dev);
+	if (!lt9611)
+		return -EINVAL;
+
+	disable_irq(lt9611->client->irq);
+	ret = lt9611_regulator_disable(lt9611);
+	return ret;
+}
+
+static int lt9611_pm_restore(struct device *dev)
+{
+	struct lt9611 *lt9611;
+	int ret = 0;
+
+	if (!dev)
+		return -EINVAL;
+
+	lt9611 = dev_get_drvdata(dev);
+	if (!lt9611)
+		return -EINVAL;
+
+	ret = lt9611_regulator_enable(lt9611);
+	if (ret)
+		pr_err("Failed to enable lt9611 regulators %d\n", ret);
+
+	enable_irq(lt9611->client->irq);
+	return ret;
+}
+
+static const struct dev_pm_ops lt9611_pm_ops = {
+	.freeze = lt9611_pm_freeze,
+	.restore  = lt9611_pm_restore,
+};
+
 static int lt9611_remove(struct i2c_client *client)
 {
 	struct lt9611 *lt9611 = i2c_get_clientdata(client);
@@ -1396,6 +1453,7 @@ static struct i2c_driver lt9611_driver = {
 	.driver = {
 		.name = "lt9611",
 		.of_match_table = lt9611_match_table,
+		.pm = &lt9611_pm_ops,
 	},
 	.probe = lt9611_probe,
 	.remove = lt9611_remove,
