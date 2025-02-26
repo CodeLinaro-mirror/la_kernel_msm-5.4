@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2007 Google, Inc.
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023,2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "msm_qpic_nand.h"
@@ -4361,12 +4361,20 @@ static int msm_nand_bam_panic_notifier(struct notifier_block *this,
 	if (err)
 		goto out;
 	pr_info("Dumping APSS bam pipes register dumps\n");
-	sps_get_bam_debug_info(info->sps.bam_handle, 93,
+	if (info->nand_chip.caps & MSM_NAND_CAP_PAGE_SCOPE_READ)
+		sps_get_bam_debug_info(info->sps.bam_handle, 93,
 			(SPS_BAM_PIPE(0) |
 			 SPS_BAM_PIPE(1) |
 			 SPS_BAM_PIPE(2) |
 			 SPS_BAM_PIPE(3)),
 			 0, 2);
+	else
+		sps_get_bam_debug_info(info->sps.bam_handle, 93,
+			(SPS_BAM_PIPE(0) |
+			 SPS_BAM_PIPE(1) |
+			 SPS_BAM_PIPE(2)),
+			 0, 2);
+
 	err = msm_nand_put_device(chip->dev);
 out:
 	if (err)
