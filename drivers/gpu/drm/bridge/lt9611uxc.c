@@ -131,6 +131,7 @@ struct lt9611 {
 	bool hpd_status;
 	bool bridge_attach;
 	bool pending_edid;
+	bool hpd_trigger;
 	bool hpd_support;
 	enum lt9611_fw_upgrade_status fw_status;
 
@@ -1250,6 +1251,10 @@ static irqreturn_t lt9611_irq_thread_handler(int irq, void *dev_id)
 			pr_info("irq status 0x%x\n", irq_status);
 			pdata->hpd_status = irq_status & BIT(1);
 			pdata->edid_status = irq_status & BIT(0);
+			if (pdata->hpd_status)
+				pdata->hpd_trigger = true;
+			else
+				pdata->hpd_trigger = false;
 		} else {
 			pr_err("invalid irq\n");
 		}
@@ -1763,16 +1768,20 @@ static int lt9611_connector_get_modes(struct drm_connector *connector)
 		pdata->edid_complete = false;
 		mutex_unlock(&pdata->lock);
 		goto read_edid;
-	} else if (!pdata->edid_status) {
+	} else if (!pdata->edid_status && pdata->hpd_trigger) {
+		pdata->hpd_trigger = false;
 		mutex_unlock(&pdata->lock);
-		ret = wait_event_timeout(pdata->edid_wq, pdata->edid_complete,
-				msecs_to_jiffies(EDID_TIMEOUT_MS));
-		if (!ret)
-			goto skip_read_edid;
+		goto wait_read_edid;
 	} else {
 		mutex_unlock(&pdata->lock);
-		goto skip_read_edid;
+		goto wait_read_edid;
 	}
+
+wait_read_edid:
+	ret = wait_event_timeout(pdata->edid_wq, pdata->edid_complete,
+			msecs_to_jiffies(EDID_TIMEOUT_MS));
+	if (!ret)
+		goto skip_read_edid;
 
 read_edid:
 	if (!pdata->edid) {
@@ -1786,6 +1795,7 @@ skip_read_edid:
 		drm_connector_update_edid_property(connector,
 			pdata->edid);
 		count = drm_add_edid_modes(connector, pdata->edid);
+		lt9611_set_preferred_mode(connector);
 	} else {
 		list_for_each_entry(mode, &pdata->mode_list, head) {
 			m = drm_mode_duplicate(connector->dev, mode);
@@ -1794,12 +1804,18 @@ skip_read_edid:
 					mode->hdisplay, mode->vdisplay);
 				break;
 			}
+
+			if (mode->hdisplay == 1920 && mode->vdisplay == 1080) {
+				mode->type |= DRM_MODE_TYPE_PREFERRED;
+				pr_warn("Read EDID failed, hence falling back "
+					"to %dx%d P\n", mode->hdisplay,
+					mode->vdisplay);
+			}
+
 			drm_mode_probed_add(connector, m);
 		}
 		count = pdata->num_of_modes;
 	}
-
-	lt9611_set_preferred_mode(connector);
 
 	return count;
 }

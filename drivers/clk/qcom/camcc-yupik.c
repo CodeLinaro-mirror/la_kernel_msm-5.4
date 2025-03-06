@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk-provider.h>
@@ -17,6 +18,7 @@
 
 #include "clk-alpha-pll.h"
 #include "clk-branch.h"
+#include "clk-pm.h"
 #include "clk-rcg.h"
 #include "common.h"
 #include "reset.h"
@@ -56,7 +58,7 @@ static struct pll_vco zonda_vco[] = {
 };
 
 /* 1200MHz Configuration */
-static const struct alpha_pll_config cam_cc_pll0_config = {
+static struct alpha_pll_config cam_cc_pll0_config = {
 	.l = 0x3E,
 	.alpha = 0x8000,
 	.config_ctl_val = 0x20485699,
@@ -72,6 +74,7 @@ static struct clk_alpha_pll cam_cc_pll0 = {
 	.vco_table = lucid_vco,
 	.num_vco = ARRAY_SIZE(lucid_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+	.config = &cam_cc_pll0_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll0",
@@ -140,7 +143,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll0_out_odd = {
 };
 
 /* 600MHz Configuration */
-static const struct alpha_pll_config cam_cc_pll1_config = {
+static struct alpha_pll_config cam_cc_pll1_config = {
 	.l = 0x1F,
 	.alpha = 0x4000,
 	.config_ctl_val = 0x20485699,
@@ -156,6 +159,7 @@ static struct clk_alpha_pll cam_cc_pll1 = {
 	.vco_table = lucid_vco,
 	.num_vco = ARRAY_SIZE(lucid_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+	.config = &cam_cc_pll1_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll1",
@@ -201,7 +205,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll1_out_even = {
 };
 
 /* 1440MHz Configuration */
-static const struct alpha_pll_config cam_cc_pll2_config = {
+static struct alpha_pll_config cam_cc_pll2_config = {
 	.l = 0x4B,
 	.alpha = 0x0,
 	.config_ctl_val = 0x08200800,
@@ -215,6 +219,7 @@ static struct clk_alpha_pll cam_cc_pll2 = {
 	.vco_table = zonda_vco,
 	.num_vco = ARRAY_SIZE(zonda_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_ZONDA],
+	.config = &cam_cc_pll2_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll2",
@@ -283,7 +288,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll2_out_aux2 = {
 };
 
 /* 760MHz Configuration */
-static const struct alpha_pll_config cam_cc_pll3_config = {
+static struct alpha_pll_config cam_cc_pll3_config = {
 	.l = 0x27,
 	.alpha = 0x9555,
 	.config_ctl_val = 0x20485699,
@@ -299,6 +304,7 @@ static struct clk_alpha_pll cam_cc_pll3 = {
 	.vco_table = lucid_vco,
 	.num_vco = ARRAY_SIZE(lucid_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+	.config = &cam_cc_pll3_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll3",
@@ -344,7 +350,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll3_out_even = {
 };
 
 /* 760MHz Configuration */
-static const struct alpha_pll_config cam_cc_pll4_config = {
+static struct alpha_pll_config cam_cc_pll4_config = {
 	.l = 0x27,
 	.alpha = 0x9555,
 	.config_ctl_val = 0x20485699,
@@ -360,6 +366,7 @@ static struct clk_alpha_pll cam_cc_pll4 = {
 	.vco_table = lucid_vco,
 	.num_vco = ARRAY_SIZE(lucid_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+	.config = &cam_cc_pll4_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll4",
@@ -405,7 +412,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll4_out_even = {
 };
 
 /* 760MHz Configuration */
-static const struct alpha_pll_config cam_cc_pll5_config = {
+static struct alpha_pll_config cam_cc_pll5_config = {
 	.l = 0x27,
 	.alpha = 0x9555,
 	.config_ctl_val = 0x20485699,
@@ -421,6 +428,7 @@ static struct clk_alpha_pll cam_cc_pll5 = {
 	.vco_table = lucid_vco,
 	.num_vco = ARRAY_SIZE(lucid_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+	.config = &cam_cc_pll5_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll5",
@@ -466,7 +474,7 @@ static struct clk_alpha_pll_postdiv cam_cc_pll5_out_even = {
 };
 
 /* 960MHz Configuration */
-static const struct alpha_pll_config cam_cc_pll6_config = {
+static struct alpha_pll_config cam_cc_pll6_config = {
 	.l = 0x32,
 	.alpha = 0x0,
 	.config_ctl_val = 0x20485699,
@@ -482,6 +490,7 @@ static struct clk_alpha_pll cam_cc_pll6 = {
 	.vco_table = lucid_vco,
 	.num_vco = ARRAY_SIZE(lucid_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+	.config = &cam_cc_pll6_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "cam_cc_pll6",
@@ -2709,7 +2718,7 @@ static const struct regmap_config cam_cc_yupik_regmap_config = {
 	.fast_io = true,
 };
 
-static const struct qcom_cc_desc cam_cc_yupik_desc = {
+static struct qcom_cc_desc cam_cc_yupik_desc = {
 	.config = &cam_cc_yupik_regmap_config,
 	.clks = cam_cc_yupik_clocks,
 	.num_clks = ARRAY_SIZE(cam_cc_yupik_clocks),
@@ -2732,16 +2741,7 @@ static int cam_cc_yupik_probe(struct platform_device *pdev)
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	pm_runtime_enable(&pdev->dev);
-	ret = pm_clk_create(&pdev->dev);
-	if (ret)
-		goto disable_pm_runtime;
-
-	ret = pm_clk_add(&pdev->dev, "cfg_ahb");
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Unable to get ahb clock handle\n");
-		goto destroy_pm_clk;
-	}
+	register_qcom_clks_pm(pdev, false, &cam_cc_yupik_desc);
 
 	clk_lucid_pll_configure(&cam_cc_pll0, regmap, &cam_cc_pll0_config);
 	clk_lucid_pll_configure(&cam_cc_pll1, regmap, &cam_cc_pll1_config);
@@ -2764,15 +2764,8 @@ static int cam_cc_yupik_probe(struct platform_device *pdev)
 destroy_pm_clk:
 	pm_clk_destroy(&pdev->dev);
 
-disable_pm_runtime:
-	pm_runtime_disable(&pdev->dev);
-
 	return ret;
 }
-
-static const struct dev_pm_ops cam_cc_yupik_pm_ops = {
-	SET_RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
-};
 
 static void cam_cc_yupik_sync_state(struct device *dev)
 {
@@ -2785,7 +2778,6 @@ static struct platform_driver cam_cc_yupik_driver = {
 		.name = "cam_cc-yupik",
 		.of_match_table = cam_cc_yupik_match_table,
 		.sync_state = cam_cc_yupik_sync_state,
-		.pm = &cam_cc_yupik_pm_ops,
 	},
 };
 

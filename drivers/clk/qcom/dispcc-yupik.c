@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk-provider.h>
@@ -17,6 +18,7 @@
 
 #include "clk-alpha-pll.h"
 #include "clk-branch.h"
+#include "clk-pm.h"
 #include "clk-rcg.h"
 #include "clk-regmap-divider.h"
 #include "common.h"
@@ -47,7 +49,7 @@ static struct pll_vco lucid_vco[] = {
 };
 
 /* 1520MHz Configuration*/
-static const struct alpha_pll_config disp_cc_pll0_config = {
+static struct alpha_pll_config disp_cc_pll0_config = {
 	.l = 0x4F,
 	.alpha = 0x2AAA,
 	.config_ctl_val = 0x20485699,
@@ -63,6 +65,7 @@ static struct clk_alpha_pll disp_cc_pll0 = {
 	.vco_table = lucid_vco,
 	.num_vco = ARRAY_SIZE(lucid_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+	.config = &disp_cc_pll0_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "disp_cc_pll0",
@@ -997,6 +1000,13 @@ static struct clk_regmap *disp_cc_yupik_clocks[] = {
 	[DISP_CC_SLEEP_CLK] = &disp_cc_sleep_clk.clkr,
 };
 
+/*
+ * disp_cc_xo_clk
+ */
+static struct critical_clk_offset critical_clk_list[] = {
+	{ .offset = 0x5008, .mask = BIT(0) },
+};
+
 static const struct regmap_config disp_cc_yupik_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
@@ -1005,12 +1015,14 @@ static const struct regmap_config disp_cc_yupik_regmap_config = {
 	.fast_io = true,
 };
 
-static const struct qcom_cc_desc disp_cc_yupik_desc = {
+static struct qcom_cc_desc disp_cc_yupik_desc = {
 	.config = &disp_cc_yupik_regmap_config,
 	.clks = disp_cc_yupik_clocks,
 	.num_clks = ARRAY_SIZE(disp_cc_yupik_clocks),
 	.clk_regulators = disp_cc_yupik_regulators,
 	.num_clk_regulators = ARRAY_SIZE(disp_cc_yupik_regulators),
+	.critical_clk_en = critical_clk_list,
+	.num_critical_clk = ARRAY_SIZE(critical_clk_list),
 };
 
 static const struct of_device_id disp_cc_yupik_match_table[] = {
@@ -1028,24 +1040,12 @@ static int disp_cc_yupik_probe(struct platform_device *pdev)
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	pm_runtime_enable(&pdev->dev);
-	ret = pm_clk_create(&pdev->dev);
-	if (ret)
-		goto disable_pm_runtime;
-
-	ret = pm_clk_add(&pdev->dev, "cfg_ahb");
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Unable to get ahb clock handle\n");
-		goto destroy_pm_clk;
-	}
+	register_qcom_clks_pm(pdev, false, &disp_cc_yupik_desc);
 
 	clk_lucid_pll_configure(&disp_cc_pll0, regmap, &disp_cc_pll0_config);
 
-	/*
-	 * Keep the clocks always-ON
-	 * DISP_CC_XO_CLK
-	 */
-	regmap_update_bits(regmap, 0x5008, BIT(0), BIT(0));
+	/* Enabling always ON clocks */
+	clk_restore_critical_clocks(&pdev->dev);
 
 	ret = qcom_cc_really_probe(pdev, &disp_cc_yupik_desc, regmap);
 	if (ret) {
@@ -1060,15 +1060,8 @@ static int disp_cc_yupik_probe(struct platform_device *pdev)
 destroy_pm_clk:
 	pm_clk_destroy(&pdev->dev);
 
-disable_pm_runtime:
-	pm_runtime_disable(&pdev->dev);
-
 	return ret;
 }
-
-static const struct dev_pm_ops disp_cc_yupik_pm_ops = {
-	SET_RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
-};
 
 static void disp_cc_yupik_sync_state(struct device *dev)
 {
@@ -1081,7 +1074,6 @@ static struct platform_driver disp_cc_yupik_driver = {
 		.name = "disp_cc-yupik",
 		.of_match_table = disp_cc_yupik_match_table,
 		.sync_state = disp_cc_yupik_sync_state,
-		.pm = &disp_cc_yupik_pm_ops,
 	},
 };
 

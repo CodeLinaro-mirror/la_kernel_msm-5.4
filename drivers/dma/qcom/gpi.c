@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/atomic.h>
@@ -2350,7 +2350,7 @@ static int gpi_pause(struct dma_chan *chan)
 	void *rp, *rp1;
 	union gpi_event *gpi_event;
 	u32 chid, type;
-	int iter = 0;
+	int schid, echid, iter = 0;
 	unsigned long total_iter = 1000; //waiting10ms 1000*udelay(10)
 
 	GPII_INFO(gpii, gpii_chan->chid, "Enter\n");
@@ -2403,8 +2403,16 @@ static int gpi_pause(struct dma_chan *chan)
 		rp1 += ev_ring->el_size;
 	}
 
+	/*
+	 * treat both channels as a group if its protocol is not UART
+	 * STOP, RESET, or START needs to be in lockstep
+	 */
+	schid = (gpii->protocol == SE_PROTOCOL_UART) ? gpii_chan->chid : 0;
+	echid = (gpii->protocol == SE_PROTOCOL_UART) ? schid + 1 :
+		MAX_CHANNELS_PER_GPII;
+
 	/* send stop command to stop the channels */
-	for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+	for (i = schid; i < echid; i++) {
 		gpii_chan = &gpii->gpii_chan[i];
 		/* disable ch state so no more TRE processing */
 		write_lock_irq(&gpii->pm_lock);
@@ -2423,7 +2431,7 @@ static int gpi_pause(struct dma_chan *chan)
 	if (gpi_ctrl->cmd == MSM_GPI_DEEP_SLEEP_INIT) {
 		GPII_INFO(gpii, gpii_chan->chid, "deep sleep config\n");
 		/* Resetting the channels */
-		for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+		for (i = schid; i < echid; i++) {
 			gpii_chan = &gpii->gpii_chan[i];
 			ret = gpi_send_cmd(gpii, gpii_chan, GPI_CH_CMD_RESET);
 			if (ret) {
@@ -2435,7 +2443,7 @@ static int gpi_pause(struct dma_chan *chan)
 		}
 
 		/* Dealloc the channels */
-		for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+		for (i = schid; i < echid; i++) {
 			gpii_chan = &gpii->gpii_chan[i];
 			ret = gpi_reset_chan(gpii_chan, GPI_CH_CMD_DE_ALLOC);
 			if (ret) {
@@ -2455,12 +2463,12 @@ static int gpi_pause(struct dma_chan *chan)
 			return ret;
 		}
 	} else {
-		for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+		for (i = schid; i < echid; i++) {
 			gpii_chan = &gpii->gpii_chan[i];
 			gpi_noop_tre(gpii_chan);
 		}
 
-		for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+		for (i = schid; i < echid; i++) {
 			gpii_chan = &gpii->gpii_chan[i];
 
 			ret = gpi_start_chan(gpii_chan);
@@ -2496,7 +2504,7 @@ static int gpi_resume(struct dma_chan *chan)
 	struct gpii *gpii = gpii_chan->gpii;
 	struct msm_gpi_ctrl *gpi_ctrl = chan->private;
 	int i;
-	int ret;
+	int ret, schid, echid;
 
 	GPII_INFO(gpii, gpii_chan->chid, "enter\n");
 
@@ -2533,8 +2541,11 @@ static int gpi_resume(struct dma_chan *chan)
 		return 0;
 	}
 
+	schid = (gpii->protocol == SE_PROTOCOL_UART) ? gpii_chan->chid : 0;
+	echid = (gpii->protocol == SE_PROTOCOL_UART) ? schid + 1 :
+		MAX_CHANNELS_PER_GPII;
 	/* send start command to start the channels */
-	for (i = 0; i < MAX_CHANNELS_PER_GPII; i++) {
+	for (i = schid; i < echid; i++) {
 		ret = gpi_send_cmd(gpii, &gpii->gpii_chan[i], GPI_CH_CMD_START);
 		if (ret) {
 			GPII_ERR(gpii, gpii->gpii_chan[i].chid,
