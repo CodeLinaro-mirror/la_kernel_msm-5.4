@@ -518,6 +518,7 @@ struct cnss_plat_data {
 	int qrtr_node_id;
 	unsigned int wlfw_service_instance_id;
 	const char *pld_bus_ops_name;
+	bool sleep_clk;
 };
 
 #ifdef CONFIG_ARCH_QCOM
@@ -575,6 +576,7 @@ int cnss_do_ramdump(struct cnss_plat_data *plat_priv);
 int cnss_do_elf_ramdump(struct cnss_plat_data *plat_priv);
 void cnss_set_pin_connect_status(struct cnss_plat_data *plat_priv);
 int cnss_get_cpr_info(struct cnss_plat_data *plat_priv);
+void cnss_get_sleep_clk_supported(struct cnss_plat_data *plat_priv);
 int cnss_update_cpr_info(struct cnss_plat_data *plat_priv);
 int cnss_va_to_pa(struct device *dev, size_t size, void *va, dma_addr_t dma,
 		  phys_addr_t *pa, unsigned long attrs);
