@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk-provider.h>
@@ -14,6 +15,7 @@
 
 #include "clk-alpha-pll.h"
 #include "clk-branch.h"
+#include "clk-pm.h"
 #include "clk-rcg.h"
 #include "clk-regmap-divider.h"
 #include "clk-regmap-mux.h"
@@ -3526,6 +3528,25 @@ static struct clk_regmap *gcc_yupik_clocks[] = {
 	[GCC_EDP_CLKREF_EN] = &gcc_edp_clkref_en.clkr,
 };
 
+/*
+ * gcc_camera_ahb_clk
+ * gcc_camera_xo_clk
+ * gcc_disp_ahb_clk
+ * gcc_disp_xo_clk
+ * gcc_video_ahb_clk
+ * gcc_video_xo_clk
+ * gcc_gpu_cfg_ahb_clk
+ */
+static struct critical_clk_offset critical_clk_list[] = {
+	{ .offset = 0x26004, .mask = BIT(0) },
+	{ .offset = 0x26028, .mask = BIT(0) },
+	{ .offset = 0x27004, .mask = BIT(0) },
+	{ .offset = 0x2701c, .mask = BIT(0) },
+	{ .offset = 0x28004, .mask = BIT(0) },
+	{ .offset = 0x28014, .mask = BIT(0) },
+	{ .offset = 0x71004, .mask = BIT(0) },
+};
+
 static const struct qcom_reset_map gcc_yupik_resets[] = {
 	[GCC_PCIE_0_BCR] = { 0x6b000 },
 	[GCC_PCIE_0_PHY_BCR] = { 0x6c01c },
@@ -3573,7 +3594,7 @@ static const struct regmap_config gcc_yupik_regmap_config = {
 	.fast_io = true,
 };
 
-static const struct qcom_cc_desc gcc_yupik_desc = {
+static struct qcom_cc_desc gcc_yupik_desc = {
 	.config = &gcc_yupik_regmap_config,
 	.clks = gcc_yupik_clocks,
 	.num_clks = ARRAY_SIZE(gcc_yupik_clocks),
@@ -3581,6 +3602,8 @@ static const struct qcom_cc_desc gcc_yupik_desc = {
 	.num_resets = ARRAY_SIZE(gcc_yupik_resets),
 	.clk_regulators = gcc_yupik_regulators,
 	.num_clk_regulators = ARRAY_SIZE(gcc_yupik_regulators),
+	.critical_clk_en = critical_clk_list,
+	.num_critical_clk = ARRAY_SIZE(critical_clk_list),
 };
 
 static const struct of_device_id gcc_yupik_match_table[] = {
@@ -3598,19 +3621,10 @@ static int gcc_yupik_probe(struct platform_device *pdev)
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	/*
-	 * Keep the clocks always-ON
-	 * GCC_CAMERA_AHB_CLK, GCC_CAMERA_XO_CLK, GCC_DISP_AHB_CLK
-	 * GCC_DISP_XO_CLK, GCC_VIDEO_AHB_CLK, GCC_VIDEO_XO_CLK,
-	 * GCC_GPU_CFG_AHB_CLK
-	 */
-	regmap_update_bits(regmap, 0x26004, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x26028, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x27004, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x2701c, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x28004, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x28014, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x71004, BIT(0), BIT(0));
+	register_qcom_clks_pm(pdev, false, &gcc_yupik_desc);
+
+	/* Enabling always ON clocks */
+	clk_restore_critical_clocks(&pdev->dev);
 
 	ret = qcom_cc_register_rcg_dfs(regmap, gcc_dfs_clocks,
 					ARRAY_SIZE(gcc_dfs_clocks));

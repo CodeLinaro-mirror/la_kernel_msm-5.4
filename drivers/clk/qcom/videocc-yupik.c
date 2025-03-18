@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk-provider.h>
@@ -16,6 +17,7 @@
 
 #include "clk-alpha-pll.h"
 #include "clk-branch.h"
+#include "clk-pm.h"
 #include "clk-rcg.h"
 #include "common.h"
 #include "reset.h"
@@ -38,7 +40,7 @@ static struct pll_vco lucid_vco[] = {
 };
 
 /* 400MHz Configuration */
-static const struct alpha_pll_config video_pll0_config = {
+static struct alpha_pll_config video_pll0_config = {
 	.l = 0x14,
 	.alpha = 0xD555,
 	.config_ctl_val = 0x20485699,
@@ -54,6 +56,7 @@ static struct clk_alpha_pll video_pll0 = {
 	.vco_table = lucid_vco,
 	.num_vco = ARRAY_SIZE(lucid_vco),
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+	.config = &video_pll0_config,
 	.clkr = {
 		.hw.init = &(struct clk_init_data){
 			.name = "video_pll0",
@@ -341,7 +344,7 @@ static const struct regmap_config video_cc_yupik_regmap_config = {
 	.fast_io = true,
 };
 
-static const struct qcom_cc_desc video_cc_yupik_desc = {
+static struct qcom_cc_desc video_cc_yupik_desc = {
 	.config = &video_cc_yupik_regmap_config,
 	.clks = video_cc_yupik_clocks,
 	.num_clks = ARRAY_SIZE(video_cc_yupik_clocks),
@@ -366,16 +369,7 @@ static int video_cc_yupik_probe(struct platform_device *pdev)
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	pm_runtime_enable(&pdev->dev);
-	ret = pm_clk_create(&pdev->dev);
-	if (ret)
-		goto disable_pm_runtime;
-
-	ret = pm_clk_add(&pdev->dev, "cfg_ahb");
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Unable to get ahb clock handle\n");
-		goto destroy_pm_clk;
-	}
+	register_qcom_clks_pm(pdev, false, &video_cc_yupik_desc);
 
 	clk_lucid_pll_configure(&video_pll0, regmap, &video_pll0_config);
 
@@ -392,15 +386,8 @@ static int video_cc_yupik_probe(struct platform_device *pdev)
 destroy_pm_clk:
 	pm_clk_destroy(&pdev->dev);
 
-disable_pm_runtime:
-	pm_runtime_disable(&pdev->dev);
-
 	return ret;
 }
-
-static const struct dev_pm_ops video_cc_yupik_pm_ops = {
-	SET_RUNTIME_PM_OPS(pm_clk_suspend, pm_clk_resume, NULL)
-};
 
 static void video_cc_yupik_sync_state(struct device *dev)
 {
@@ -413,7 +400,6 @@ static struct platform_driver video_cc_yupik_driver = {
 		.name = "video_cc-yupik",
 		.of_match_table = video_cc_yupik_match_table,
 		.sync_state = video_cc_yupik_sync_state,
-		.pm = &video_cc_yupik_pm_ops,
 	},
 };
 

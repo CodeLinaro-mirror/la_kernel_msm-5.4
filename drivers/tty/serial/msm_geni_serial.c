@@ -343,6 +343,8 @@ struct msm_geni_serial_port {
 	bool resuming_from_deep_sleep;
 	unsigned long ser_clk_cfg;
 	enum uart_port_state port_state;
+	bool is_deep_sleep;
+	bool is_gsi_resume;
 };
 
 static struct uart_port *uart_console_uport;
@@ -1507,14 +1509,13 @@ static void msm_geni_uart_gsi_rx_cb(void *ptr)
 	unsigned int rx_bytes = rx_cb->length;
 	int ret;
 
-	UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev,
-		     "%s:Start\n", __func__);
+	UART_LOG_DBG(msm_port->ipc_log_rx, uport->dev, "%s:Start\n", __func__);
 	ret = tty_insert_flip_string(tport,
 		(unsigned char *)(msm_port->rx_gsi_buf[msm_port->count]),
 							rx_bytes);
 	if (ret != rx_bytes)
-		dev_err(uport->dev, "%s: ret %d rx_bytes %d\n", __func__,
-					ret, rx_bytes);
+		UART_LOG_DBG(msm_port->ipc_log_rx, uport->dev,
+			     "%s: ret %d rx_bytes %d\n", __func__, ret, rx_bytes);
 
 	uport->icount.rx += ret;
 	tty_flip_buffer_push(tport);
@@ -1523,8 +1524,7 @@ static void msm_geni_uart_gsi_rx_cb(void *ptr)
 
 	msm_geni_uart_rx_queue_dma_tre(msm_port->count, uport);
 	msm_port->count = (msm_port->count + 1) % 4;
-	UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev,
-		     "%s:End\n", __func__);
+	UART_LOG_DBG(msm_port->ipc_log_rx, uport->dev, "%s:End\n", __func__);
 }
 
 static void msm_geni_deallocate_chan(struct uart_port *uport)
@@ -1619,7 +1619,7 @@ static void msm_geni_uart_gsi_xfer_tx(struct work_struct *work)
 		xmit_size = UART_XMIT_SIZE - xmit->tail;
 
 	if (!xmit_size || msm_port->tx_dma)
-		return;
+		goto exit_gsi_xfer;
 
 	dump_ipc(uport, msm_port->ipc_log_tx, "DMA Tx",
 		 (char *)&xmit->buf[xmit->tail], 0, xmit_size);
@@ -1628,7 +1628,7 @@ static void msm_geni_uart_gsi_xfer_tx(struct work_struct *work)
 	if (ret) {
 		dev_err(uport->dev, "%s: Allocation of Channel failed:%d\n",
 						__func__, ret);
-		return;
+		goto exit_gsi_xfer;
 	}
 	sg_init_table(msm_port->gsi->tx_sg, 3);
 	sg_set_buf(msm_port->gsi->tx_sg, &msm_port->gsi->tx_cfg0_t,
@@ -1651,7 +1651,7 @@ static void msm_geni_uart_gsi_xfer_tx(struct work_struct *work)
 		dev_err(uport->dev, "%s:Failed to allocate memory\n",
 							__func__);
 		msm_geni_deallocate_chan(uport);
-		return;
+		goto exit_gsi_xfer;
 	}
 	msm_port->gsi->tx_t.dword[0] =
 			MSM_GPI_DMA_W_BUFFER_TRE_DWORD0(msm_port->tx_dma);
@@ -1681,7 +1681,7 @@ static void msm_geni_uart_gsi_xfer_tx(struct work_struct *work)
 	if (dma_submit_error(tx_cookie)) {
 		pr_err("%s: dmaengine_submit failed (%d)\n", __func__, tx_cookie);
 		dmaengine_terminate_all(msm_port->gsi->tx_c);
-		return;
+		goto exit_gsi_xfer;
 	}
 	reinit_completion(&msm_port->tx_xfer);
 	dma_async_issue_pending(msm_port->gsi->tx_c);
@@ -1698,6 +1698,9 @@ exit_gsi_tx_xfer:
 	msm_geni_deallocate_chan(uport);
 	UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev,
 		     "%s: End\n", __func__);
+exit_gsi_xfer:
+	atomic_set(&msm_port->xfer_inprogress, 0);
+	UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev, "%s: TX aborted, End\n", __func__);
 }
 
 static void msm_geni_uart_gsi_cancel_tx(struct work_struct *work)
@@ -2771,8 +2774,8 @@ static int msm_geni_serial_handle_dma_rx(struct uart_port *uport, bool drop_rx)
 	ret = tty_insert_flip_string(tport, (unsigned char *)(msm_port->rx_buf),
 				     rx_bytes);
 	if (ret != rx_bytes) {
-		dev_err(uport->dev, "%s: ret %d rx_bytes %d\n", __func__,
-								ret, rx_bytes);
+		UART_LOG_DBG(msm_port->ipc_log_rx, uport->dev, "%s: ret %d rx_bytes %d\n",
+			     __func__, ret, rx_bytes);
 		msm_geni_update_uart_error_code(msm_port, UART_ERROR_RX_TTY_INSET_FAIL);
 		WARN_ON_ONCE(1);
 	}
@@ -4646,13 +4649,15 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 
 	if (is_console) {
 		dev_port->handle_rx = handle_rx_console;
-		dev_port->rx_fifo = devm_kzalloc(uport->dev, sizeof(u32),
-								GFP_KERNEL);
+		dev_port->rx_fifo = devm_kzalloc(uport->dev, sizeof(u32), GFP_KERNEL);
+		if (!dev_port->rx_fifo)
+			return -ENOMEM;
 	} else {
 		dev_port->handle_rx = handle_rx_hs;
-		dev_port->rx_fifo = devm_kzalloc(uport->dev,
-				sizeof(dev_port->rx_fifo_depth * sizeof(u32)),
-								GFP_KERNEL);
+		dev_port->rx_fifo = devm_kzalloc(uport->dev, (dev_port->rx_fifo_depth *
+						 sizeof(u32)), GFP_KERNEL);
+		if (!dev_port->rx_fifo)
+			return -ENOMEM;
 		if (dev_port->pm_auto_suspend_disable) {
 			pm_runtime_set_active(&pdev->dev);
 			pm_runtime_forbid(&pdev->dev);
@@ -4691,6 +4696,8 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 	msm_geni_serial_debug_init(uport, is_console);
 	dev_port->port_setup = false;
 	dev_port->serial_rsc.base = uport->membase;
+	dev_port->is_gsi_resume = true;
+	dev_port->is_deep_sleep = false;
 
 	dev_port->uart_error = UART_ERROR_DEFAULT;
 
@@ -4803,6 +4810,47 @@ static void msm_geni_serial_allow_rx(struct msm_geni_serial_port *port)
 }
 
 #ifdef CONFIG_PM
+static int msm_geni_uart_gsi_suspend_resume(struct msm_geni_serial_port *msm_port,
+					    bool suspend)
+{
+	int tx_ret;
+
+	/* Do dma operations only for tx channel here, as it takes care of rx channel
+	 * also internally from the GPI driver functions. if we call for both channels,
+	 * will see channels in wrong state due to double operations.
+	 */
+	if(msm_port->gsi->tx_c != NULL) {
+		if (msm_port->is_deep_sleep)
+			msm_port->gsi->tx_ev.cmd = MSM_GPI_DEEP_SLEEP_INIT;
+
+		if(suspend) {
+			/* For deep sleep need to restore the config similar to the probe,
+			 * hence using MSM_GPI_DEEP_SLEEP_INIT flag, in gpi_resume it will
+			 * do similar to the probe. After this we should set this flag to
+			 * MSM_GPI_DEFAULT, means gpi probe state is restored.
+			 */
+			tx_ret = dmaengine_pause(msm_port->gsi->tx_c);
+		} else {
+			tx_ret = dmaengine_resume(msm_port->gsi->tx_c);
+			if (msm_port->is_deep_sleep) {
+				msm_port->gsi->tx_ev.cmd = MSM_GPI_DEFAULT;
+				msm_port->is_deep_sleep = false;
+			}
+		}
+		UART_LOG_DBG(msm_port->ipc_log_pwr, msm_port->uport.dev,
+			     "%s: Deepsleep %d suspend %d\n",
+			     __func__, msm_port->is_deep_sleep, suspend);
+
+		if (tx_ret) {
+			UART_LOG_DBG(msm_port->ipc_log_misc, msm_port->uport.dev,
+				     "%s failed: tx:%d status:%d\n",
+				    __func__, tx_ret, suspend);
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+
 static int msm_geni_serial_runtime_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -4834,6 +4882,17 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 			return -EBUSY;
 		}
 	}
+
+	if (port->gsi_mode && port->is_gsi_resume) {
+		UART_LOG_DBG(port->ipc_log_pwr, dev, "%s: GSI suspend \n", __func__);
+		ret = msm_geni_uart_gsi_suspend_resume(port, true);
+		if (ret) {
+			dev_err(dev, "%s: Error ret %d\n", __func__, ret);
+			return ret;
+		}
+		port->is_gsi_resume = false;
+	}
+
 	/*
 	 * Stop Rx.
 	 * Disable Interrupt
@@ -4952,6 +5011,11 @@ static int msm_geni_serial_runtime_resume(struct device *dev)
 		port->resuming_from_deep_sleep = false;
 	}
 
+	if (port->gsi_mode && !port->is_gsi_resume) {
+		ret = msm_geni_uart_gsi_suspend_resume(port, false);
+		port->is_gsi_resume = true;
+		UART_LOG_DBG(port->ipc_log_pwr, dev, "%s: GSI resumed \n", __func__);
+	}
 	UART_LOG_DBG(port->ipc_log_pwr, dev, "%s:\n", __func__);
 exit_runtime_resume:
 	return ret;
@@ -4996,6 +5060,7 @@ static int msm_geni_serial_sys_hib_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct msm_geni_serial_port *port = platform_get_drvdata(pdev);
 	struct uart_port *uport = &port->uport;
+	bool force_resume = false;
 
 	if (uart_console(uport) || port->pm_auto_suspend_disable) {
 		uart_suspend_port((struct uart_driver *)uport->private_data,
@@ -5016,8 +5081,37 @@ static int msm_geni_serial_sys_hib_suspend(struct device *dev)
 			mutex_unlock(&tty_port->mutex);
 			return -EBUSY;
 		}
+
+		if (port->gsi_mode ) {
+			/* Checking for runtime suspend. If suspended, turning
+			 * on the clocks and resuming the GSI. Later suspending
+			 * GSI with deep sleep flag for resetting & deallocating
+			 * channels in GSI and later turning off the clocks.
+			 */
+			if (pm_runtime_status_suspended(dev)) {
+				se_geni_clks_on(&port->serial_rsc);
+				msm_geni_uart_gsi_suspend_resume(port, false);
+				force_resume = true;
+				UART_LOG_DBG(port->ipc_log_pwr, dev,
+					     "%s: GSI channels force resumed \n",
+					     __func__);
+			}
+			port->is_deep_sleep = true;
+
+			if (msm_geni_uart_gsi_suspend_resume(port, true)) {
+				if(force_resume)
+					se_geni_clks_off(&port->serial_rsc);
+				dev_err(dev, "%s: Error: GSI channels suspend \n",
+					__func__);
+				mutex_unlock(&tty_port->mutex);
+				return -EBUSY;
+			}
+			if(force_resume)
+				se_geni_clks_off(&port->serial_rsc);
+			port->is_gsi_resume = false;
+		}
 		geni_se_ssc_clk_enable(&port->serial_rsc, false);
-		UART_LOG_DBG(port->ipc_log_pwr, dev, "%s\n", __func__);
+		UART_LOG_DBG(port->ipc_log_pwr, dev, "%s Done\n", __func__);
 		mutex_unlock(&tty_port->mutex);
 	}
 	return 0;
@@ -5047,6 +5141,11 @@ static int msm_geni_serial_sys_hib_resume(struct device *dev)
 		 */
 		port->port_setup = false;
 		geni_se_ssc_clk_enable(&port->serial_rsc, true);
+		if(port->gsi_mode && !port->is_gsi_resume) {
+			port->is_deep_sleep = true;
+			UART_LOG_DBG(port->ipc_log_pwr, dev,
+				     "%s: Resume GSI channels \n", __func__);
+		}
 	}
 	return 0;
 }
@@ -5106,6 +5205,12 @@ static int msm_geni_serial_sys_hib_resume(struct device *dev)
 }
 
 static int msm_geni_serial_sys_hib_suspend(struct device *dev)
+{
+	return 0;
+}
+
+static int msm_geni_uart_gsi_suspend_resume(struct msm_geni_serial_port *msm_port,
+					    bool suspend)
 {
 	return 0;
 }
