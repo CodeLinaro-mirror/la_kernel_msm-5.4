@@ -942,7 +942,6 @@ static int ax88179_link_reset(struct ax_device *axdev)
 	return 0;
 }
 
-
 static int ax88179_tx_fixup(struct ax_device *axdev, struct tx_desc *desc)
 {
 	struct sk_buff_head skb_head, *tx_queue = &axdev->tx_queue[0];
@@ -1156,14 +1155,14 @@ static int ax88179_system_resume(struct ax_device *axdev)
 #endif
 	reg16 = AX_PHYPWR_RSTCTL_IPRL;
 	ax_write_cmd_nopm(axdev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL, 2, 2, &reg16);
-	msleep(500);
+	msleep(200);
 
 	ax88179_AutoDetach(axdev, 1);
 
 	ax_read_cmd_nopm(axdev, AX_ACCESS_MAC,  AX_CLK_SELECT, 1, 1, &reg8, 0);
 	reg8 |= AX_CLK_SELECT_ACS | AX_CLK_SELECT_BCS;
 	ax_write_cmd_nopm(axdev, AX_ACCESS_MAC, AX_CLK_SELECT, 1, 1, &reg8);
-	msleep(200);
+	msleep(100);
 
 	reg16 = AX_RX_CTL_START | AX_RX_CTL_AP |
 		AX_RX_CTL_AMALL | AX_RX_CTL_AB;

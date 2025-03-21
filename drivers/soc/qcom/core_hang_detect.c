@@ -276,6 +276,7 @@ static int msm_hang_detect_probe(struct platform_device *pdev)
 		pr_err("%s: Can't get label property\n", __func__);
 		return -EINVAL;
 	}
+
 	ret = of_property_read_u32(node, "cluster-id", &fw_cluster_id);
 	if (ret) {
 		pr_err("%s: Missing cluster-id.\n", __func__);

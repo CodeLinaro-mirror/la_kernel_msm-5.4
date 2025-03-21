@@ -67,6 +67,7 @@
 #define STRONG_PD_EN_BIT		BIT(7)
 
 #define PM8008_MAX_LDO			7
+#define PM8008_CHIP_STATE_RETRIES	3
 
 struct pm8008_chip {
 	struct device		*dev;
@@ -883,6 +884,7 @@ static int pm8008_chip_init_regulator(struct pm8008_chip *chip)
 {
 	struct regulator_config cfg = {};
 	int rc = 0;
+	u8 retry_count = PM8008_CHIP_STATE_RETRIES;
 
 	cfg.dev = chip->dev;
 	cfg.driver_data = chip;
@@ -897,7 +899,10 @@ static int pm8008_chip_init_regulator(struct pm8008_chip *chip)
 	 * aggr_enabled so that the regulator is automatically disabled if no
 	 * framework or internal enable requests are made.
 	 */
-	rc = _pm8008_chip_is_enabled(chip);
+
+	do {
+		rc = _pm8008_chip_is_enabled(chip);
+	} while ((rc < 0) && retry_count--);
 	if (rc < 0)
 		return rc;
 	chip->framework_enabled = rc;

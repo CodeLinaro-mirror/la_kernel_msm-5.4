@@ -1769,14 +1769,17 @@ static int lt9611_connector_get_modes(struct drm_connector *connector)
 	} else if (!pdata->edid_status && pdata->hpd_trigger) {
 		pdata->hpd_trigger = false;
 		mutex_unlock(&pdata->lock);
-		ret = wait_event_timeout(pdata->edid_wq, pdata->edid_complete,
-				msecs_to_jiffies(EDID_TIMEOUT_MS));
-		if (!ret)
-			goto skip_read_edid;
+		goto wait_read_edid;
 	} else {
 		mutex_unlock(&pdata->lock);
-		goto skip_read_edid;
+		goto wait_read_edid;
 	}
+
+wait_read_edid:
+	ret = wait_event_timeout(pdata->edid_wq, pdata->edid_complete,
+			msecs_to_jiffies(EDID_TIMEOUT_MS));
+	if (!ret)
+		goto skip_read_edid;
 
 read_edid:
 	if (!pdata->edid) {
@@ -1790,6 +1793,7 @@ skip_read_edid:
 		drm_connector_update_edid_property(connector,
 			pdata->edid);
 		count = drm_add_edid_modes(connector, pdata->edid);
+		lt9611_set_preferred_mode(connector);
 	} else {
 		list_for_each_entry(mode, &pdata->mode_list, head) {
 			m = drm_mode_duplicate(connector->dev, mode);
@@ -1798,12 +1802,18 @@ skip_read_edid:
 					mode->hdisplay, mode->vdisplay);
 				break;
 			}
+
+			if (mode->hdisplay == 1920 && mode->vdisplay == 1080) {
+				mode->type |= DRM_MODE_TYPE_PREFERRED;
+				pr_warn("Read EDID failed, hence falling back "
+					"to %dx%d P\n", mode->hdisplay,
+					mode->vdisplay);
+			}
+
 			drm_mode_probed_add(connector, m);
 		}
 		count = pdata->num_of_modes;
 	}
-
-	lt9611_set_preferred_mode(connector);
 
 	return count;
 }
@@ -2208,15 +2218,6 @@ static int lt9611_probe(struct i2c_client *client,
 		goto err_sysfs_init;
 	}
 
-	i2c_set_clientdata(client, pdata);
-	dev_set_drvdata(&client->dev, pdata);
-
-	ret = lt9611_sysfs_init(&client->dev);
-	if (ret) {
-		pr_err("sysfs init failed\n");
-		goto err_sysfs_init;
-	}
-
 	chip_version = lt9611_get_version(pdata);
 	pdata->hpd_support = false;
 	if (chip_version) {
@@ -2238,13 +2239,6 @@ static int lt9611_probe(struct i2c_client *client,
 	mutex_init(&pdata->lock);
 	init_waitqueue_head(&pdata->edid_wq);
 
-#if IS_ENABLED(CONFIG_OF)
-	pdata->bridge.of_node = client->dev.of_node;
-#endif
-
-	pdata->bridge.funcs = &lt9611_bridge_funcs;
-	drm_bridge_add(&pdata->bridge);
-
 	pdata->wq = create_singlethread_workqueue("lt9611_wk");
 	if (!pdata->wq) {
 		pr_err("Error creating lt9611 wq\n");
@@ -2259,6 +2253,22 @@ static int lt9611_probe(struct i2c_client *client,
 		pr_err("failed to request irq\n");
 		goto err_i2c_prog;
 	}
+
+	i2c_set_clientdata(client, pdata);
+	dev_set_drvdata(&client->dev, pdata);
+
+	ret = lt9611_sysfs_init(&client->dev);
+	if (ret) {
+		pr_err("sysfs init failed\n");
+		goto err_sysfs_init;
+	}
+
+#if IS_ENABLED(CONFIG_OF)
+	pdata->bridge.of_node = client->dev.of_node;
+#endif
+
+	pdata->bridge.funcs = &lt9611_bridge_funcs;
+	drm_bridge_add(&pdata->bridge);
 
 	if (pdata->audio_support) {
 		pdata->audio_pdev =
