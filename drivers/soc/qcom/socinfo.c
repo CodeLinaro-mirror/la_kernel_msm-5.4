@@ -1296,6 +1296,9 @@ static int qcom_socinfo_probe(struct platform_device *pdev)
 					   SOCINFO_MINOR(le32_to_cpu(info->ver)));
 	qs->attr.soc_id = kasprintf(GFP_KERNEL, "%d", socinfo_get_id());
 
+	if (!qs->attr.soc_id || !qs->attr.revision)
+		return -ENOMEM;
+
 	qsocinfo = qs;
 	init_rwsem(&qs->current_image_rwsem);
 	socinfo_populate_sysfs(qs);
