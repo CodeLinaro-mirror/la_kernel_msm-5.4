@@ -1615,27 +1615,40 @@ struct smi130_acc_data {
 	struct hrtimer smi130_hrtimer;
 #endif
 };
+static int poll_enabled = 0;
 
 #ifdef SMI130_HRTIMER
 static void smi130_set_cpu_idle_state(bool value)
 {
-	cpu_idle_poll_ctrl(value);
+	if (value && poll_enabled == 0) {
+		cpu_idle_poll_ctrl(true);
+		poll_enabled = 1;
+	} else if (!value && poll_enabled == 1) {
+		cpu_idle_poll_ctrl(false);
+		poll_enabled = 0;
+	}
 }
 
 static enum hrtimer_restart smi130_timer_function(struct hrtimer *timer)
 {
-	smi130_set_cpu_idle_state(true);
-
+	struct smi130_acc_data *data = container_of(timer,
+			struct smi130_acc_data, smi130_hrtimer);
+	if (data->acc_enable  || data->acc_buffer_smi130_samples) {
+		smi130_set_cpu_idle_state(true);
+	}
 	return HRTIMER_NORESTART;
 }
 
 static void smi130_hrtimer_reset(struct smi130_acc_data *data)
 {
-	hrtimer_cancel(&data->smi130_hrtimer);
-	/* forward HRTIMER just before 1ms of irq arrival */
-	hrtimer_forward(&data->smi130_hrtimer, ktime_get(),
+	if(hrtimer_active(&data->smi130_hrtimer)) {
+	  /* forward HRTIMER just before 1ms of irq arrival */
+	  hrtimer_forward(&data->smi130_hrtimer, ktime_get(),
 			ns_to_ktime(data->time_odr - 1000000));
-	hrtimer_restart(&data->smi130_hrtimer);
+	  hrtimer_restart(&data->smi130_hrtimer);
+        } else {
+	  hrtimer_start(&data->smi130_hrtimer, ns_to_ktime(data->time_odr - 1000000), HRTIMER_MODE_REL);
+	}
 }
 
 static void smi130_hrtimer_init(struct smi130_acc_data *data)
@@ -4133,8 +4146,13 @@ static void smi130_check_acc_enable_flag(struct smi130_acc_data *client_data,
 {
 	if (data == SMI_ACC2X2_MODE_NORMAL)
 		client_data->acc_enable = true;
-	else
+	else {
 		client_data->acc_enable = false;
+		if (poll_enabled == 1) {
+			cpu_idle_poll_ctrl(false);
+			poll_enabled = 0;
+		}
+	}
 }
 #else
 static inline int smi130_check_acc_early_buff_enable_flag(
@@ -6994,9 +7012,14 @@ static void store_acc_boot_sample(struct smi130_acc_data *client_data,
 		PINFO("End of ACC buffering %d\n",
 				client_data->acc_bufsample_cnt);
 		client_data->acc_buffer_smi130_samples = false;
-		if (!client_data->acc_enable)
+		if (!client_data->acc_enable) {
 			smi130_acc_set_mode(client_data->smi130_acc_client,
 					SMI_ACC2X2_MODE_SUSPEND, 1);
+			if (poll_enabled == 1) {
+				cpu_idle_poll_ctrl(false);
+				poll_enabled = 0;
+			}
+		}
 	}
 	mutex_unlock(&client_data->acc_sensor_buff);
 }
@@ -7067,7 +7090,6 @@ static int smi130_acc_early_buff_init(struct i2c_client *client,
 	client_data->acc_buffer_smi130_samples = true;
 	client_data->acc_enable = false;
 
-	smi130_set_cpu_idle_state(true);
 
 	mutex_init(&client_data->acc_sensor_buff);
 
@@ -7119,6 +7141,7 @@ static irqreturn_t smi130_acc_irq_work_func(int irq, void *handle)
 	unsigned char status = 0;
 	unsigned char first_value = 0;
 	unsigned char sign_value = 0;
+	smi130_set_cpu_idle_state(false);
 
 #ifdef CONFIG_SMI_ACC_ENABLE_NEWDATA_INT
 	static struct smi130_accacc acc;
@@ -7157,7 +7180,6 @@ static irqreturn_t smi130_acc_irq_work_func(int irq, void *handle)
 	}
 	store_acc_boot_sample(smi130_acc, acc.x, acc.y, acc.z, ts);
 
-	smi130_set_cpu_idle_state(false);
 	return IRQ_HANDLED;
 #endif
 	smi130_acc_get_interruptstatus1(smi130_acc->smi130_acc_client, &status);
