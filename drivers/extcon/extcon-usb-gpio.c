@@ -19,8 +19,11 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/pinctrl/consumer.h>
+#include <linux/delay.h>
 
+#define INIT_STATE_DELAY	50
 #define USB_GPIO_DEBOUNCE_MS	20	/* ms */
+static bool usb_enable_flag = false;
 
 struct usb_extcon_info {
 	struct device *dev;
@@ -115,6 +118,9 @@ static int usb_extcon_probe(struct platform_device *pdev)
 	if (!info)
 		return -ENOMEM;
 
+	usb_enable_flag = of_property_read_bool(pdev->dev.of_node, "extcon-usb-enable");
+	pr_info("%s usb_enable_flag = %d\n",__func__, usb_enable_flag);
+
 	info->dev = dev;
 	info->id_gpiod = devm_gpiod_get_optional(&pdev->dev, "id", GPIOD_IN);
 	info->vbus_gpiod = devm_gpiod_get_optional(&pdev->dev, "vbus",
@@ -146,6 +152,20 @@ static int usb_extcon_probe(struct platform_device *pdev)
 	if (ret < 0) {
 		dev_err(dev, "failed to register extcon device\n");
 		return ret;
+	}
+
+	if(usb_enable_flag) {
+		/*init state : HOST */
+		extcon_set_state_sync(info->edev, EXTCON_USB_HOST, true);
+
+		ret |= extcon_set_property_capability(info->edev,
+				EXTCON_USB, EXTCON_PROP_USB_SS);
+		ret |= extcon_set_property_capability(info->edev,
+				EXTCON_USB_HOST, EXTCON_PROP_USB_SS);
+
+		if (ret < 0) {
+			dev_err(dev, "failed to configure extcon capabilities\n");
+		}
 	}
 
 	if (info->id_gpiod)
@@ -199,9 +219,16 @@ static int usb_extcon_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, info);
 	device_set_wakeup_capable(&pdev->dev, true);
 
-	/* Perform initial detection */
-	usb_extcon_detect_cable(&info->wq_detcable.work);
-
+	if(usb_enable_flag) {
+		if(info->id_gpiod) {
+			if (gpiod_get_value_cansleep(info->id_gpiod)) {
+				queue_delayed_work(system_power_efficient_wq, &info->wq_detcable,(INIT_STATE_DELAY*HZ));
+			}
+		}
+	} else {
+		/* Perform initial detection */
+		usb_extcon_detect_cable(&info->wq_detcable.work);
+	}
 	return 0;
 }
 
