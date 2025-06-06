@@ -729,12 +729,16 @@ static const struct soc_id soc_id[] = {
 	{ 408, "SA415M" },
 	{ 575, "KATMAI" },
 	{ 576, "KATMAIP" },
+	{ 279, "MDM9650" },
+	{ 283, "MDM9250" },
+	{ 286, "MDM9655" },
 	{ 290, "MDM9607" },
 	{ 296, "MDM8207" },
 	{ 297, "MDM9207" },
 	{ 298, "MDM9307" },
 	{ 299, "MDM9628" },
 	{ 322, "MDM9206" },
+	{ 359, "MDM9150" },
 	{ 572, "MDM9628AQ" },
 };
 
@@ -1304,6 +1308,9 @@ static int qcom_socinfo_probe(struct platform_device *pdev)
 					   SOCINFO_MAJOR(le32_to_cpu(info->ver)),
 					   SOCINFO_MINOR(le32_to_cpu(info->ver)));
 	qs->attr.soc_id = kasprintf(GFP_KERNEL, "%d", socinfo_get_id());
+
+	if (!qs->attr.soc_id || !qs->attr.revision)
+		return -ENOMEM;
 
 	qsocinfo = qs;
 	init_rwsem(&qs->current_image_rwsem);

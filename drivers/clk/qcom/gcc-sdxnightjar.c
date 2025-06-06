@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2025, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk-provider.h>
@@ -37,10 +38,14 @@ enum {
 	P_SLEEP_CLK,
 };
 
+static unsigned int soft_vote_gpll0;
+
 /* Spark PLL */
 static struct clk_alpha_pll gpll0 = {
 	.offset = 0x21000,
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
+	.soft_vote = &soft_vote_gpll0,
+	.soft_vote_mask = PLL_SOFT_VOTE_PRIMARY,
 	.flags = SUPPORTS_FSM_MODE,
 	.clkr = {
 		.enable_reg = 0x45000,
@@ -67,6 +72,8 @@ static struct clk_alpha_pll gpll0_ao = {
 	.offset = 0x21000,
 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_DEFAULT],
 	.flags = SUPPORTS_FSM_MODE,
+	.soft_vote = &soft_vote_gpll0,
+	.soft_vote_mask = PLL_SOFT_VOTE_CPU,
 	.clkr = {
 		.enable_reg = 0x45000,
 		.enable_mask = BIT(0),
