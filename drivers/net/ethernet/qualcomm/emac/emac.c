@@ -3522,15 +3522,15 @@ err_init_mdio_gpio:
 	adpt->gpio_off(adpt, true, true);
 err_clk_init:
 	if ((!adpt->mac2mac_en) &&
-	    (ATH8030_PHY_ID == adpt->phydev->phy_id) ||
-	    (ATH8031_PHY_ID == adpt->phydev->phy_id) ||
-	    (ATH8035_PHY_ID == adpt->phydev->phy_id))
+	    ((ATH8030_PHY_ID == adpt->phydev->phy_id) ||
+	     (ATH8031_PHY_ID == adpt->phydev->phy_id) ||
+	     (ATH8035_PHY_ID == adpt->phydev->phy_id)))
 		emac_disable_clks(adpt);
 err_ldo_init:
 	if ((!adpt->mac2mac_en) &&
-	    (ATH8030_PHY_ID == adpt->phydev->phy_id) ||
-	    (ATH8031_PHY_ID == adpt->phydev->phy_id) ||
-	    (ATH8035_PHY_ID == adpt->phydev->phy_id))
+	    ((ATH8030_PHY_ID == adpt->phydev->phy_id) ||
+	     (ATH8031_PHY_ID == adpt->phydev->phy_id) ||
+	     (ATH8035_PHY_ID == adpt->phydev->phy_id)))
 		emac_disable_regulator(adpt, EMAC_VREG1, EMAC_VREG5);
 err_get_resource:
 	free_netdev(netdev);
