@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk.h>
@@ -308,13 +308,8 @@ static struct spi_master *get_spi_master(struct device *dev)
 static inline void spi_geni_clk_conf(struct spi_geni_master *mas,
 		int clk_div, int clk_idx)
 {
-	u32 clk_sel = 0;
-	u32 m_clk_cfg = 0;
-
-	clk_sel |= (clk_idx & CLK_SEL_MSK);
-	m_clk_cfg |= ((clk_div << CLK_DIV_SHFT) | SER_CLK_EN);
-	geni_write_reg(clk_sel, mas->base, SE_GENI_CLK_SEL);
-	geni_write_reg(m_clk_cfg, mas->base, GENI_SER_M_CLK_CFG);
+	geni_write_reg((clk_idx & CLK_SEL_MSK), mas->base, SE_GENI_CLK_SEL);
+	geni_write_reg(((clk_div << CLK_DIV_SHFT) | SER_CLK_EN), mas->base, GENI_SER_M_CLK_CFG);
 
 	/*
 	 * Ensure Clk config completes before return.
@@ -352,7 +347,9 @@ static int get_spi_clk_cfg(u32 speed_hz, struct spi_geni_master *mas,
 	dev_dbg(mas->dev, "%s: req %u resultant %lu sclk %lu, idx %d, div %d\n",
 		__func__, speed_hz, res_freq, sclk_freq, *clk_idx, *clk_div);
 
-	spi_geni_clk_conf(mas, *clk_div, *clk_idx);
+
+	if (mas->cur_xfer_mode != GSI_DMA)
+		spi_geni_clk_conf(mas, *clk_div, *clk_idx);
 
 	ret = clk_set_rate(rsc->se_clk, sclk_freq);
 	if (ret) {
@@ -1596,7 +1593,7 @@ static int setup_fifo_xfer(struct spi_transfer *xfer,
 		ret = get_spi_clk_cfg(xfer->speed_hz, mas, &idx, &div);
 		if (ret) {
 			dev_err(mas->dev, "%s:Err setting clks:%d\n",
-								__func__, ret);
+				__func__, ret);
 			return ret;
 		}
 		mas->cur_speed_hz = xfer->speed_hz;

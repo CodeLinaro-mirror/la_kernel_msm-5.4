@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2008-2018, 2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2572,6 +2572,10 @@ skip_dma_resources:
 		goto err_probe_reqmem;
 	}
 
+	rc = msm_spi_get_icc_path(dd, pdev);
+	if (rc != 0)
+		goto err_probe_reqmem;
+
 	pm_runtime_set_autosuspend_delay(&pdev->dev, MSEC_PER_SEC);
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
@@ -2669,7 +2673,6 @@ static int msm_spi_pm_resume_runtime(struct device *device)
 
 		dd->is_init_complete = true;
 	}
-	msm_spi_get_icc_path(dd, pdev);
 	msm_spi_clk_path_vote(dd, dd->pdata->max_clock_speed);
 
 	if (!dd->pdata->is_shared) {

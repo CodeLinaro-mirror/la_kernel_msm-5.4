@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2015-2021, The Linux Foundation. All rights reserved. */
 /* Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved. */
+/* Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved. */
 
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -56,6 +57,7 @@
 #define CAN_FD_PACKET_SIZE		46
 #define CAN_STANDARD_PACKET_SIZE	22
 #define TIME_REQUEST_PERIOD         (30000) /* 30 Seconds */
+#define STRING_TERMIINATING_INDEX	47
 
 static int static_pos_checksum_en;
 static int dynamic_pos_checksum_en;
@@ -587,6 +589,8 @@ static int qti_can_process_response(struct qti_can *priv_data,
 
 		dev_info(&priv_data->spidev->dev, "fw %d.%d.%d\n",
 			 fw_resp->maj, fw_resp->min, fw_resp->sub_min);
+		/* It will help in exiting while printing string on console. */
+		fw_resp->ver[STRING_TERMIINATING_INDEX] = '\0';
 		dev_info(&priv_data->spidev->dev, "fw string %s\n",
 			 fw_resp->ver);
 	} else if (resp->cmd  == CMD_GET_FW_BR_VERSION) {

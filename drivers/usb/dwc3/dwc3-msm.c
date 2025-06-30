@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2024-2025, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -5690,7 +5690,7 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
 	struct dwc3_msm *mdwc;
-	int ret = 0;
+	int ret;
 
 	mdwc = dwc3_msm_allocate(pdev);
 	if (!mdwc)
@@ -5716,7 +5716,8 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	}
 
 	/* Get all clks and gdsc reference */
-	if (dwc3_msm_get_clk_gdsc(mdwc)) {
+	ret = dwc3_msm_get_clk_gdsc(mdwc);
+	if (ret < 0) {
 		dev_err(&pdev->dev, "error getting clock or gdsc.\n");
 		goto err;
 	}
@@ -5724,48 +5725,62 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	mdwc->id_state = DWC3_ID_FLOAT;
 	set_bit(ID, &mdwc->inputs);
 
-	if (dwc3_msm_ioremap(pdev))
+	ret = dwc3_msm_ioremap(pdev);
+	if (ret < 0)
 		goto err;
 
 	ahb_init(mdwc);
 
 	dwc3_set_notifier(&dwc3_msm_notify_event);
 
-	if (dwc3_msm_parse_params(mdwc))
+	ret = dwc3_msm_parse_params(mdwc);
+	if (ret < 0)
 		goto err;
 
-	if (dma_init(mdwc))
+	ret = dma_init(mdwc);
+	if (ret < 0)
 		goto err;
 
-	if (dwc3_msm_child_init(pdev))
+	ret = dwc3_msm_child_init(pdev);
+	if (ret < 0)
 		goto err;
 
 	dwc3_msm_interconnect_vote_populate(mdwc);
 
 	iccs_get(mdwc);
 
-	if (hs_phys_init(mdwc) || ss_phys_init(mdwc))
+	ret = hs_phys_init(mdwc);
+	if (ret < 0)
 		goto put_dwc3;
 
-	if (irq_init(pdev))
+	ret = ss_phys_init(mdwc);
+	if (ret < 0)
 		goto put_dwc3;
 
-	if (dwc3_init_dbm(mdwc))
+	ret = irq_init(pdev);
+	if (ret < 0)
+		goto put_dwc3;
+
+	ret = dwc3_init_dbm(mdwc);
+	if (ret < 0)
 		goto put_dwc3;
 
 	dwc3_msm_pm_init(mdwc);
 
-	if (dwc3_msm_ocp_init(pdev))
+	ret = dwc3_msm_ocp_init(pdev);
+	if (ret < 0)
 		goto put_dwc3;
 
 	typec_orientation_set(mdwc);
 
-	if (role_switch_init(mdwc))
+	ret = role_switch_init(mdwc);
+	if (ret < 0)
 		goto put_dwc3;
 
 	apsd_source_init(mdwc);
 
-	if (dwc3_msm_extcon_register(mdwc))
+	ret = dwc3_msm_extcon_register(mdwc);
+	if (ret < 0)
 		goto put_dwc3;
 
 	dpdm_init(mdwc);
