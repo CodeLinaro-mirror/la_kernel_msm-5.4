@@ -429,6 +429,8 @@ struct ep_pcie_dev_t {
 	struct clk		     *pipe_clk_mux;
 	struct clk		     *pipe_clk_ext_src;
 	struct clk		     *ref_clk_src;
+	bool                         skip_bdf_to_sid_disable;
+	bool                         skip_AXI_reconnect_seq;
 };
 
 extern struct ep_pcie_dev_t ep_pcie_dev;
