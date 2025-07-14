@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -97,6 +97,7 @@ struct lt9611 {
 	u32 hdmi_3p3_en;
 	u32 hdmi_1p2_en;
 	u32 ls_gpio;
+	bool reset_gpio_flags;
 
 	unsigned int num_vreg;
 	struct lt9611_vreg *vreg_config;
@@ -116,6 +117,7 @@ struct lt9611 {
 	struct drm_display_mode debug_mode;
 
 	struct workqueue_struct *wq;
+	struct work_struct edid_work;
 	struct work_struct work;
 	wait_queue_head_t edid_wq;
 
@@ -134,6 +136,8 @@ struct lt9611 {
 	bool hpd_trigger;
 	bool hpd_support;
 	enum lt9611_fw_upgrade_status fw_status;
+
+	bool cont_splash_en;
 
 	struct msm_ext_disp_audio_edid_blk audio_edid_blk;
 	u8 raw_sad[MAX_NUMBER_ADB * MAX_AUDIO_DATA_BLOCK_SIZE];
@@ -424,6 +428,22 @@ end:
 	return rc;
 }
 
+void lt9611_helper_read_edid(struct lt9611 *pdata)
+{
+	lt9611_read_edid(pdata);
+	pdata->edid = drm_do_get_edid(&pdata->connector,
+			lt9611_get_edid_block, pdata);
+}
+
+void lt9611_edid_work(struct work_struct *work)
+{
+	struct lt9611 *pdata = container_of(work, struct lt9611, edid_work);
+
+	pr_info("Reading edid work from the init work.\n");
+
+	lt9611_helper_read_edid(pdata);
+}
+
 static void lt9611_hpd_work(struct work_struct *work)
 {
 	char name[32], status[32];
@@ -447,6 +467,7 @@ static void lt9611_hpd_work(struct work_struct *work)
 
 	if (pdata->connector.status != connector_status_connected) {
 		pr_err("release edid\n");
+		pdata->cont_splash_en = false;
 		pdata->edid_complete = false;
 		kfree(pdata->edid);
 		pdata->edid = NULL;
@@ -1007,6 +1028,10 @@ static int lt9611_parse_dt(struct device *dev,
 	}
 	pr_debug("reset_gpio=%d\n", pdata->reset_gpio);
 
+	pdata->reset_gpio_flags = of_property_read_bool(np,
+						"lt,reset-gpio-flags");
+	pr_debug("reset_gpio_flags=%d\n", pdata->reset_gpio_flags);
+
 	pdata->ls_gpio =
 		of_get_named_gpio(np, "lt,ls-gpio", 0);
 	if (!gpio_is_valid(pdata->ls_gpio))
@@ -1042,6 +1067,10 @@ static int lt9611_parse_dt(struct device *dev,
 	pdata->audio_support =
 		of_property_read_bool(np, "lt,audio-support");
 	pr_debug("audio support = %d\n", pdata->audio_support);
+
+	pdata->cont_splash_en = of_property_read_bool(np, "lt,cont_splash_en");
+	pr_debug("HW cont splash support %d\n", pdata->cont_splash_en);
+
 	/*get display modes from device tree*/
 	INIT_LIST_HEAD(&pdata->mode_list);
 	lt9611_parse_dt_modes(np,
@@ -1052,6 +1081,8 @@ static int lt9611_parse_dt(struct device *dev,
 static int lt9611_gpio_configure(struct lt9611 *pdata, bool on)
 {
 	int ret = 0;
+	int gpio_value = (pdata->cont_splash_en) ? 1 : 0;
+	int gpio_default_state = 1;
 
 	if (on) {
 		if (gpio_is_valid(pdata->hdmi_3p3_en)) {
@@ -1062,7 +1093,7 @@ static int lt9611_gpio_configure(struct lt9611 *pdata, bool on)
 				goto error;
 			}
 
-			ret = gpio_direction_output(pdata->hdmi_3p3_en, 0);
+			ret = gpio_direction_output(pdata->hdmi_3p3_en, gpio_value);
 			if (ret) {
 				pr_err("lt9611 3p3 en gpio direction failed\n");
 				goto hdmi_3p3_error;
@@ -1077,7 +1108,7 @@ static int lt9611_gpio_configure(struct lt9611 *pdata, bool on)
 				goto hdmi_3p3_error;
 			}
 
-			ret = gpio_direction_output(pdata->hdmi_1p2_en, 0);
+			ret = gpio_direction_output(pdata->hdmi_1p2_en, gpio_value);
 			if (ret) {
 				pr_err("lt9611 1p2 en gpio direction failed\n");
 				goto hdmi_1p2_error;
@@ -1091,11 +1122,16 @@ static int lt9611_gpio_configure(struct lt9611 *pdata, bool on)
 			goto hdmi_1p2_error;
 		}
 
-		ret = gpio_direction_output(pdata->reset_gpio, 1);
-		if (ret) {
-			pr_err("lt9611 reset gpio direction failed\n");
-			goto reset_error;
+		if (!pdata->cont_splash_en) {
+			if (pdata->reset_gpio_flags)
+				gpio_default_state = 0;
+			ret = gpio_direction_output(pdata->reset_gpio, gpio_default_state);
+			if (ret) {
+				pr_err("lt9611 reset gpio direction failed\n");
+				goto reset_error;
+			}
 		}
+
 
 		if (gpio_is_valid(pdata->hdmi_en_gpio)) {
 			ret = gpio_request(pdata->hdmi_en_gpio,
@@ -1276,7 +1312,11 @@ static irqreturn_t lt9611_irq_thread_handler(int irq, void *dev_id)
 			pdata->edid_complete = false;
 		mutex_unlock(&pdata->lock);
 	}
+
 	msleep(50);
+	if ((irq_type & BIT(0)) && pdata->edid_status)
+		queue_work(pdata->wq, &pdata->edid_work);
+
 	if (irq_type & BIT(1)) {
 		pr_info("hpd changed\n");
 		if (!pdata->bridge_attach)
@@ -1289,16 +1329,21 @@ static irqreturn_t lt9611_irq_thread_handler(int irq, void *dev_id)
 
 static void lt9611_reset(struct lt9611 *pdata, bool on_off)
 {
+	int gpio_default_state = 1;
+
 	pr_debug("reset: %d\n", on_off);
+	if (pdata->reset_gpio_flags)
+		gpio_default_state = 0;
+
 	if (on_off) {
-		gpio_set_value(pdata->reset_gpio, 1);
+		gpio_set_value(pdata->reset_gpio, gpio_default_state);
 		msleep(20);
-		gpio_set_value(pdata->reset_gpio, 0);
+		gpio_set_value(pdata->reset_gpio, !gpio_default_state);
 		msleep(20);
-		gpio_set_value(pdata->reset_gpio, 1);
+		gpio_set_value(pdata->reset_gpio, gpio_default_state);
 		msleep(300);
 	} else {
-		gpio_set_value(pdata->reset_gpio, 0);
+		gpio_set_value(pdata->reset_gpio, !gpio_default_state);
 	}
 	/* Need longer time to wait LT9611UXC reset finished. */
 	msleep(300);
@@ -1618,7 +1663,6 @@ lt9611_connector_detect(struct drm_connector *connector, bool force)
 {
 	u8 hpd_status = 0;
 	struct lt9611 *pdata = connector_to_lt9611(connector);
-
 	pdata->status = connector_status_disconnected;
 	if (force && pdata->hpd_support) {
 		mutex_lock(&pdata->lock);
@@ -1633,9 +1677,11 @@ lt9611_connector_detect(struct drm_connector *connector, bool force)
 		lt9611_ctl_disable(pdata);
 		mutex_unlock(&pdata->lock);
 		msleep(50);
+		if ((pdata->status == connector_status_connected)
+						&& !pdata->edid)
+			lt9611_helper_read_edid(pdata);
 	} else
 		pdata->status = connector_status_connected;
-
 	return pdata->status;
 }
 
@@ -1663,7 +1709,6 @@ static int lt9611_read_edid(struct lt9611 *pdata)
 
 	lt9611_ctl_disable(pdata);
 	mutex_unlock(&pdata->lock);
-
 	return 0;
 }
 
@@ -1707,7 +1752,6 @@ static void lt9611_choose_best_mode(struct drm_connector *connector)
 		preferred_vrefresh = preferred_mode->vrefresh ?
 			preferred_mode->vrefresh :
 			drm_mode_vrefresh(preferred_mode);
-
 		/*At a given size, try to get closest to target refresh*/
 		if ((MODE_SIZE(cur_mode) == MODE_SIZE(preferred_mode)) &&
 			MODE_REFRESH_DIFF(cur_vrefresh, target_refresh) <
@@ -1778,11 +1822,12 @@ static int lt9611_connector_get_modes(struct drm_connector *connector)
 	}
 
 wait_read_edid:
-	ret = wait_event_timeout(pdata->edid_wq, pdata->edid_complete,
+	if (!pdata->edid) {
+		ret = wait_event_timeout(pdata->edid_wq, pdata->edid_complete,
 			msecs_to_jiffies(EDID_TIMEOUT_MS));
-	if (!ret)
-		goto skip_read_edid;
-
+		if (!ret)
+			goto skip_read_edid;
+	}
 read_edid:
 	if (!pdata->edid) {
 		lt9611_read_edid(pdata);
@@ -1816,7 +1861,6 @@ skip_read_edid:
 		}
 		count = pdata->num_of_modes;
 	}
-
 	return count;
 }
 
@@ -1929,7 +1973,6 @@ static int lt9611_bridge_attach(struct drm_bridge *bridge)
 		DRM_ERROR("Parent encoder object not found");
 		return -ENODEV;
 	}
-
 	ret = drm_connector_init(bridge->dev, &pdata->connector,
 				 &lt9611_connector_funcs,
 				 DRM_MODE_CONNECTOR_HDMIA);
@@ -1997,7 +2040,9 @@ static void lt9611_bridge_pre_enable(struct drm_bridge *bridge)
 	struct lt9611 *pdata = bridge_to_lt9611(bridge);
 
 	pr_debug("bridge pre_enable\n");
-	lt9611_reset(pdata, true);
+	if (!pdata->cont_splash_en)
+		lt9611_reset(pdata, true);
+
 }
 
 static bool lt9611_bridge_mode_fixup(struct drm_bridge *bridge,
@@ -2212,7 +2257,8 @@ static int lt9611_probe(struct i2c_client *client,
 		goto err_i2c_prog;
 	}
 
-	lt9611_reset(pdata, true);
+	if (!pdata->cont_splash_en)
+		lt9611_reset(pdata, true);
 
 	ret = lt9611_read_device_id(pdata);
 	if (ret) {
@@ -2241,6 +2287,13 @@ static int lt9611_probe(struct i2c_client *client,
 	mutex_init(&pdata->lock);
 	init_waitqueue_head(&pdata->edid_wq);
 
+	pdata->wq = create_singlethread_workqueue("lt9611_workqueue");
+	if (!pdata->wq) {
+		pr_err("Error creating lt9611 workqueue\n");
+		goto err_sysfs_init;;
+	}
+
+	INIT_WORK(&pdata->edid_work, lt9611_edid_work);
 	pdata->wq = create_singlethread_workqueue("lt9611_wk");
 	if (!pdata->wq) {
 		pr_err("Error creating lt9611 wq\n");
@@ -2268,7 +2321,6 @@ static int lt9611_probe(struct i2c_client *client,
 #if IS_ENABLED(CONFIG_OF)
 	pdata->bridge.of_node = client->dev.of_node;
 #endif
-
 	pdata->bridge.funcs = &lt9611_bridge_funcs;
 	drm_bridge_add(&pdata->bridge);
 
