@@ -14,6 +14,7 @@ struct device;
 
 struct ramdump_segment {
 	char *name;
+	unsigned int type;
 	unsigned long address;
 	volatile void __iomem *v_address;
 	unsigned long size;

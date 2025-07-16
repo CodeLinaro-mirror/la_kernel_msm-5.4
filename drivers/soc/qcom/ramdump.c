@@ -489,7 +489,7 @@ static int _do_ramdump(void *handle, struct ramdump_segment *segments,
 		offset = rd_dev->elfcore_size;
 		phdr = (Elf32_Phdr *)(ehdr + 1);
 		for (i = 0; i < nsegments; i++, phdr++) {
-			phdr->p_type = PT_LOAD;
+			phdr->p_type = segments[i].type;
 			phdr->p_offset = offset;
 			phdr->p_vaddr = phdr->p_paddr = segments[i].address;
 			phdr->p_filesz = phdr->p_memsz = segments[i].size;
