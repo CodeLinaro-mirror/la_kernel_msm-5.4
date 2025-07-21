@@ -27,16 +27,6 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  arch/powerpc/kernel/interrupt.c        |    4 ++--
  3 files changed, 9 insertions(+), 5 deletions(-)
 
---- a/arch/powerpc/Kconfig
-+++ b/arch/powerpc/Kconfig
-@@ -145,6 +145,7 @@ config PPC
- 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
- 	select ARCH_HAS_PHYS_TO_DMA
- 	select ARCH_HAS_PMEM_API
-+	select ARCH_HAS_PREEMPT_LAZY
- 	select ARCH_HAS_PTE_DEVMAP		if PPC_BOOK3S_64
- 	select ARCH_HAS_PTE_SPECIAL
- 	select ARCH_HAS_SCALED_CPUTIME		if VIRT_CPU_ACCOUNTING_NATIVE && PPC_BOOK3S_64
 --- a/arch/powerpc/include/asm/thread_info.h
 +++ b/arch/powerpc/include/asm/thread_info.h
 @@ -103,6 +103,7 @@ void arch_setup_new_exec(void);
@@ -69,6 +59,16 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  #define _TIF_PERSYSCALL_MASK	(_TIF_RESTOREALL|_TIF_NOERROR)
  
  /* Bits in local_flags */
+--- a/arch/powerpc/Kconfig
++++ b/arch/powerpc/Kconfig
+@@ -145,6 +145,7 @@ config PPC
+ 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
+ 	select ARCH_HAS_PHYS_TO_DMA
+ 	select ARCH_HAS_PMEM_API
++	select ARCH_HAS_PREEMPT_LAZY
+ 	select ARCH_HAS_PTE_DEVMAP		if PPC_BOOK3S_64
+ 	select ARCH_HAS_PTE_SPECIAL
+ 	select ARCH_HAS_SCALED_CPUTIME		if VIRT_CPU_ACCOUNTING_NATIVE && PPC_BOOK3S_64
 --- a/arch/powerpc/kernel/interrupt.c
 +++ b/arch/powerpc/kernel/interrupt.c
 @@ -185,7 +185,7 @@ interrupt_exit_user_prepare_main(unsigne

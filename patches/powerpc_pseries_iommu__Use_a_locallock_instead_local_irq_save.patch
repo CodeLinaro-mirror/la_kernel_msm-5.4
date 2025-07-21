@@ -29,7 +29,7 @@ Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
  #include <asm/io.h>
  #include <asm/prom.h>
  #include <asm/rtas.h>
-@@ -244,7 +245,13 @@ static int tce_build_pSeriesLP(unsigned
+@@ -245,7 +246,13 @@ static int tce_build_pSeriesLP(unsigned
  	return ret;
  }
  
@@ -44,7 +44,7 @@ Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
  
  static int tce_buildmulti_pSeriesLP(struct iommu_table *tbl, long tcenum,
  				     long npages, unsigned long uaddr,
-@@ -267,9 +274,10 @@ static int tce_buildmulti_pSeriesLP(stru
+@@ -268,9 +275,10 @@ static int tce_buildmulti_pSeriesLP(stru
  		                           direction, attrs);
  	}
  
@@ -57,7 +57,7 @@ Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
  
  	/* This is safe to do since interrupts are off when we're called
  	 * from iommu_alloc{,_sg}()
-@@ -278,12 +286,12 @@ static int tce_buildmulti_pSeriesLP(stru
+@@ -279,12 +287,12 @@ static int tce_buildmulti_pSeriesLP(stru
  		tcep = (__be64 *)__get_free_page(GFP_ATOMIC);
  		/* If allocation fails, fall back to the loop implementation */
  		if (!tcep) {
@@ -72,7 +72,7 @@ Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
  	}
  
  	rpn = __pa(uaddr) >> tceshift;
-@@ -313,7 +321,7 @@ static int tce_buildmulti_pSeriesLP(stru
+@@ -314,7 +322,7 @@ static int tce_buildmulti_pSeriesLP(stru
  		tcenum += limit;
  	} while (npages > 0 && !rc);
  
@@ -81,7 +81,7 @@ Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
  
  	if (unlikely(rc == H_NOT_ENOUGH_RESOURCES)) {
  		ret = (int)rc;
-@@ -497,16 +505,17 @@ static int tce_setrange_multi_pSeriesLP(
+@@ -498,16 +506,17 @@ static int tce_setrange_multi_pSeriesLP(
  				DMA_BIDIRECTIONAL, 0);
  	}
  
@@ -103,7 +103,7 @@ Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
  	}
  
  	proto_tce = TCE_PCI_READ | TCE_PCI_WRITE;
-@@ -549,7 +558,7 @@ static int tce_setrange_multi_pSeriesLP(
+@@ -550,7 +559,7 @@ static int tce_setrange_multi_pSeriesLP(
  
  	/* error cleanup: caller will clear whole range */
  

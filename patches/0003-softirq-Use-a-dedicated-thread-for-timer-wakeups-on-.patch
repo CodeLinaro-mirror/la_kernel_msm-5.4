@@ -116,7 +116,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	/* Don't allow time recalculation while creating a new task. */
 --- a/kernel/softirq.c
 +++ b/kernel/softirq.c
-@@ -631,6 +631,24 @@ static inline void tick_irq_exit(void)
+@@ -649,6 +649,24 @@ static inline void tick_irq_exit(void)
  #endif
  }
  
@@ -141,7 +141,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  static inline void __irq_exit_rcu(void)
  {
  #ifndef __ARCH_IRQ_EXIT_IRQS_DISABLED
-@@ -643,6 +661,10 @@ static inline void __irq_exit_rcu(void)
+@@ -661,6 +679,10 @@ static inline void __irq_exit_rcu(void)
  	if (!in_interrupt() && local_softirq_pending())
  		invoke_softirq();
  
@@ -152,7 +152,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	tick_irq_exit();
  }
  
-@@ -978,12 +1000,57 @@ static struct smp_hotplug_thread softirq
+@@ -996,12 +1018,57 @@ static struct smp_hotplug_thread softirq
  	.thread_comm		= "ksoftirqd/%u",
  };
  
@@ -213,7 +213,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  early_initcall(spawn_ksoftirqd);
 --- a/kernel/time/hrtimer.c
 +++ b/kernel/time/hrtimer.c
-@@ -1874,7 +1874,7 @@ void hrtimer_interrupt(struct clock_even
+@@ -1869,7 +1869,7 @@ void hrtimer_interrupt(struct clock_even
  	if (!ktime_before(now, cpu_base->softirq_expires_next)) {
  		cpu_base->softirq_expires_next = KTIME_MAX;
  		cpu_base->softirq_activated = 1;
@@ -222,7 +222,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	}
  
  	__hrtimer_run_queues(cpu_base, now, flags, HRTIMER_ACTIVE_HARD);
-@@ -1969,7 +1969,7 @@ void hrtimer_run_queues(void)
+@@ -1964,7 +1964,7 @@ void hrtimer_run_queues(void)
  	if (!ktime_before(now, cpu_base->softirq_expires_next)) {
  		cpu_base->softirq_expires_next = KTIME_MAX;
  		cpu_base->softirq_activated = 1;
