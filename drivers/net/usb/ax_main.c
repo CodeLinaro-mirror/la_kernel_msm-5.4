@@ -60,50 +60,6 @@ void ax_get_drvinfo(struct net_device *net, struct ethtool_drvinfo *info)
 		axdev->fw_version[2], axdev->fw_version[3]);
 }
 
-#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
-int ax_get_settings(struct net_device *netdev, struct ethtool_cmd *cmd)
-{
-	struct ax_device *axdev = netdev_priv(netdevnetdev);
-	int ret;
-
-	if (!axdev->mii.mdio_read)
-		return -EOPNOTSUPP;
-
-	ret = usb_autopm_get_interface(axdev->intf);
-	if (ret < 0)
-		return ret;
-
-	mutex_lock(&axdev->control);
-
-	mii_ethtool_gset(&axdev->mii, cmd);
-
-	mutex_unlock(&axdev->control);
-
-	usb_autopm_put_interface(axdev->intf);
-
-	return 0;
-}
-
-int ax_set_settings(struct net_device *netdev, struct ethtool_cmd *cmd)
-{
-	struct ax_device *axdev = netdev_priv(netdev);
-	int ret;
-
-	ret = usb_autopm_get_interface(axdev->intf);
-	if (ret < 0)
-		return ret;
-
-	mutex_lock(&axdev->control);
-
-	mii_ethtool_sset(&axdev->mii, cmd);
-
-	mutex_unlock(&axdev->control);
-
-	usb_autopm_put_interface(axdev->intf);
-
-	return 0;
-}
-#else
 int ax_get_link_ksettings(struct net_device *netdev,
 			  struct ethtool_link_ksettings *cmd)
 {
@@ -148,7 +104,7 @@ int ax_set_link_ksettings(struct net_device *netdev,
 
 	return 0;
 }
-#endif
+
 u32 ax_get_msglevel(struct net_device *netdev)
 {
 	struct ax_device *axdev = netdev_priv(netdev);
@@ -591,11 +547,7 @@ int ax_write_cmd(struct ax_device *dev, u8 cmd, u16 value, u16 index, u16 size,
 	return ret;
 }
 
-#if KERNEL_VERSION(2, 6, 20) > LINUX_VERSION_CODE
-static void ax_async_write_callback(struct urb *urb, struct pt_regs *regs)
-#else
 static void ax_async_write_callback(struct urb *urb)
-#endif
 {
 	struct _async_cmd_handle *asyncdata = (typeof(asyncdata))urb->context;
 
@@ -1252,12 +1204,8 @@ static inline int __ax_poll(struct ax_device *axdev, int budget)
 	ax_bottom_half(axdev);
 
 	if (work_done < budget) {
-#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
-		napi_complete_done(napi, work_done);
-#else
 		if (!napi_complete_done(napi, work_done))
 			return work_done;
-#endif
 		if (!list_empty(&axdev->rx_done))
 			napi_schedule(napi);
 		else if (ax_check_tx_queue_not_empty(axdev) >= 0 &&
@@ -1298,11 +1246,7 @@ static void ax_drop_queued_tx(struct ax_device *axdev)
 	}
 }
 
-#if KERNEL_VERSION(5, 6, 0) <= LINUX_VERSION_CODE
-static void ax_tx_timeout(struct net_device *netdev, unsigned int txqueue)
-#else
 static void ax_tx_timeout(struct net_device *netdev)
-#endif
 {
 	struct ax_device *axdev = netdev_priv(netdev);
 
@@ -1401,22 +1345,13 @@ static void ax_disable(struct ax_device *axdev)
 	ax_stop_rx(axdev);
 }
 
-#if KERNEL_VERSION(2, 6, 39) <= LINUX_VERSION_CODE
 static int
-#if KERNEL_VERSION(3, 3, 0) <= LINUX_VERSION_CODE
 ax88179_set_features(struct net_device *net, netdev_features_t features)
-#else
-ax88179_set_features(struct net_device *net, u32 features)
-#endif
 {
 	struct ax_device *dev = netdev_priv(net);
 	u8 reg8;
 
-#if KERNEL_VERSION(3, 3, 0) <= LINUX_VERSION_CODE
 	netdev_features_t changed = net->features ^ features;
-#else
-	u32 changed = net->features ^ features;
-#endif
 
 	if (changed & NETIF_F_IP_CSUM) {
 		ax_read_cmd(dev, AX_ACCESS_MAC, AX_TXCOE_CTL, 1, 1, &reg8, 0);
@@ -1439,7 +1374,6 @@ ax88179_set_features(struct net_device *net, u32 features)
 
 	return 0;
 }
-#endif
 
 static void ax_set_carrier(struct ax_device *axdev)
 {
@@ -2085,10 +2019,6 @@ static int ax_reset_resume(struct usb_interface *intf)
 const struct net_device_ops ax88179_netdev_ops = {
 	.ndo_open		= ax_open,
 	.ndo_stop		= ax_close,
-#if KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE
-	.ndo_siocdevprivate	= ax88179_siocdevprivate,
-	.ndo_eth_ioctl		= ax88179_ioctl,
-#endif
 	.ndo_do_ioctl		= ax88179_ioctl,
 	.ndo_start_xmit		= ax_start_xmit,
 	.ndo_tx_timeout		= ax_tx_timeout,
@@ -2102,10 +2032,6 @@ const struct net_device_ops ax88179_netdev_ops = {
 const struct net_device_ops ax88179a_netdev_ops = {
 	.ndo_open		= ax_open,
 	.ndo_stop		= ax_close,
-#if KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE
-	.ndo_siocdevprivate	= ax88179a_siocdevprivate,
-	.ndo_eth_ioctl		= ax88179a_ioctl,
-#endif
 	.ndo_do_ioctl		= ax88179a_ioctl,
 	.ndo_start_xmit		= ax_start_xmit,
 	.ndo_tx_timeout		= ax_tx_timeout,
@@ -2158,9 +2084,7 @@ static struct usb_driver ax_usb_driver = {
 	.pre_reset	= ax_pre_reset,
 	.post_reset	= ax_post_reset,
 	.supports_autosuspend = 1,
-#if KERNEL_VERSION(3, 5, 0) <= LINUX_VERSION_CODE
 	.disable_hub_initiated_lpm = 1,
-#endif
 };
 
 module_usb_driver(ax_usb_driver);
