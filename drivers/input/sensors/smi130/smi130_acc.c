@@ -1613,6 +1613,7 @@ struct smi130_acc_data {
 #endif
 #ifdef SMI130_HRTIMER
 	struct hrtimer smi130_hrtimer;
+	ktime_t irq_timestamp;
 #endif
 };
 static int poll_enabled = 0;
@@ -1633,21 +1634,25 @@ static enum hrtimer_restart smi130_timer_function(struct hrtimer *timer)
 {
 	struct smi130_acc_data *data = container_of(timer,
 			struct smi130_acc_data, smi130_hrtimer);
+	ktime_t now = ktime_get();
+	ktime_t interval = ns_to_ktime(data->time_odr*2 - 1000000);
+	ktime_t next = ktime_add(data->irq_timestamp, interval);
+
 	if (data->acc_enable  || data->acc_buffer_smi130_samples) {
 		smi130_set_cpu_idle_state(true);
+		if (ktime_compare(next, now) > 0) {
+			hrtimer_set_expires(timer, next);
+			return HRTIMER_RESTART;
+		}
 	}
 	return HRTIMER_NORESTART;
 }
 
 static void smi130_hrtimer_reset(struct smi130_acc_data *data)
 {
-	if(hrtimer_active(&data->smi130_hrtimer)) {
-	  /* forward HRTIMER just before 1ms of irq arrival */
-	  hrtimer_forward(&data->smi130_hrtimer, ktime_get(),
-			ns_to_ktime(data->time_odr - 1000000));
-	  hrtimer_restart(&data->smi130_hrtimer);
-        } else {
-	  hrtimer_start(&data->smi130_hrtimer, ns_to_ktime(data->time_odr - 1000000), HRTIMER_MODE_REL);
+	data->irq_timestamp = ktime_get();
+	if(!hrtimer_active(&data->smi130_hrtimer)) {
+		hrtimer_start(&data->smi130_hrtimer, ktime_add_ns(data->irq_timestamp, data->time_odr - 1000000), HRTIMER_MODE_ABS);
 	}
 }
 
@@ -5586,6 +5591,12 @@ static ssize_t smi130_acc_mode_store(struct device *dev,
 	if (smi130_acc_set_mode(smi130_acc->smi130_acc_client,
 		(unsigned char) data, SMI_ACC_ENABLED_ALL) < 0)
 			return -EINVAL;
+	
+	//make sure to bring back the cpu idle state back to original once sensor is disabled
+	if(!smi130_acc->acc_enable)
+	{
+		smi130_set_cpu_idle_state(false);
+	}
 
 	return count;
 }
@@ -6656,7 +6667,7 @@ static ssize_t read_acc_boot_sample_store(struct device *dev,
 	mutex_unlock(&smi130_acc->acc_sensor_buff);
 	if (err)
 		return err;
-
+	smi130_set_cpu_idle_state(false);
 	smi130_acc->read_acc_boot_sample = enable;
 	return count;
 }
@@ -7327,14 +7338,12 @@ static irqreturn_t smi130_acc_irq_work_func(int irq, void *handle)
 static irqreturn_t smi130_acc_irq_handler(int irq, void *handle)
 {
 	struct smi130_acc_data *data = handle;
-
 	if (data == NULL)
 		return IRQ_HANDLED;
 	if (data->smi130_acc_client == NULL)
 		return IRQ_HANDLED;
 	data->timestamp = smi130_acc_get_alarm_timestamp();
 	smi130_hrtimer_reset(data);
-
 	return IRQ_WAKE_THREAD;
 }
 #endif /* defined(SMI_ACC2X2_ENABLE_INT1)||defined(SMI_ACC2X2_ENABLE_INT2) */
