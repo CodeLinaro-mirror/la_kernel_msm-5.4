@@ -186,8 +186,10 @@ static void etr_pcie_close_channel(struct byte_cntr *byte_cntr_data)
 		return;
 
 	mutex_lock(&byte_cntr_data->byte_cntr_lock);
-	mhi_dev_close_channel(byte_cntr_data->out_handle);
 	byte_cntr_data->pcie_chan_opened = false;
+	wake_up(&byte_cntr_data->pcie_wait_wq);
+	flush_work(&byte_cntr_data->pcie_write_work);
+	mhi_dev_close_channel(byte_cntr_data->out_handle);
 	mutex_unlock(&byte_cntr_data->byte_cntr_lock);
 }
 
