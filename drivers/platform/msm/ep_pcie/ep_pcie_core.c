@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.*/
 /* Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.*/
+/* Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.*/
 
 /*
  * MSM PCIe endpoint core driver.
@@ -601,27 +602,34 @@ static void ep_pcie_core_init(struct ep_pcie_dev_t *dev, bool configured)
 	uint32_t val = 0;
 
 	EP_PCIE_DBG(dev, "PCIe V%d\n", dev->rev);
-	EP_PCIE_DBG(dev,
-		"PCIe V%d: WRITING TO BDF TO SID\n",
-			dev->rev);
-	/* PARF_BDF_TO_SID disable */
-	ep_pcie_write_mask(dev->parf + PCIE20_PARF_BDF_TO_SID_CFG,
-			0, BIT(0));
 
-	EP_PCIE_DBG(dev,
-		"PCIe V%d: FINISHED WRITING BDF TO SID\n",
-			dev->rev);
+	if(!dev->skip_bdf_to_sid_disable) {
+		EP_PCIE_DBG(dev,
+			"PCIe V%d: WRITING TO BDF TO SID\n", dev->rev);
+
+		/* PARF_BDF_TO_SID disable */
+		ep_pcie_write_mask(dev->parf + PCIE20_PARF_BDF_TO_SID_CFG,
+				0, BIT(0));
+
+		EP_PCIE_DBG(dev,
+			"PCIe V%d: FINISHED WRITING BDF TO SID\n", dev->rev);
+	}
+
 	/* enable debug IRQ */
 	ep_pcie_write_mask(dev->parf + PCIE20_PARF_DEBUG_INT_EN,
 			0, BIT(3) | BIT(2) | BIT(1));
-	/* Reconnect AXI master port */
-	val = readl_relaxed(dev->parf + PCIE20_PARF_BUS_DISCONNECT_STATUS);
-	if (val & BIT(0)) {
-		EP_PCIE_DBG(dev,
-		"PCIe V%d: AXI Master port was disconnected, reconnecting...\n",
-			dev->rev);
-		ep_pcie_write_mask(dev->parf + PCIE20_PARF_BUS_DISCONNECT_CTRL,
-								0, BIT(0));
+
+	if(!dev->skip_AXI_reconnect_seq) {
+		/* Reconnect AXI master port */
+		val = readl_relaxed(dev->parf + PCIE20_PARF_BUS_DISCONNECT_STATUS);
+		if (val & BIT(0)) {
+			EP_PCIE_DBG(dev,
+			"PCIe V%d: AXI Master port was disconnected, reconnecting...\n",
+				dev->rev);
+
+			ep_pcie_write_mask(dev->parf +
+				PCIE20_PARF_BUS_DISCONNECT_CTRL, 0, BIT(0));
+		}
 	}
 
 	/* Update offset to AXI address for Host initiated SOC reset */
@@ -3582,6 +3590,14 @@ static int ep_pcie_probe(struct platform_device *pdev)
 		EP_PCIE_DBG(&ep_pcie_dev,
 			"PCIe V%d: Gen4 using aux_clk = 16.6 MHz\n",
 				ep_pcie_dev.rev);
+
+	ep_pcie_dev.skip_bdf_to_sid_disable =
+				of_property_read_bool((&pdev->dev)->of_node,
+						"qcom,skip-bdf-to-sid-disable");
+
+	ep_pcie_dev.skip_AXI_reconnect_seq =
+				of_property_read_bool((&pdev->dev)->of_node,
+						"qcom,skip-AXI-reconnect-seq");
 
 	memcpy(ep_pcie_dev.vreg, ep_pcie_vreg_info,
 				sizeof(ep_pcie_vreg_info));

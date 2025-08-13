@@ -176,7 +176,7 @@
 #define SMI_I2C_WRITE_DELAY_TIME (1)
 
 /* generic */
-#define SMI_MAX_RETRY_I2C_XFER (10)
+#define SMI_MAX_RETRY_I2C_XFER (1)
 #define SMI_MAX_RETRY_WAKEUP (5)
 #define SMI_MAX_RETRY_WAIT_DRDY (100)
 

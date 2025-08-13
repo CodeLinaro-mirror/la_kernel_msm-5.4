@@ -560,7 +560,6 @@ static int inv_mpu_probe(struct i2c_client *client,
 	}
 	pr_info("%s: power on.\n", __func__);
 
-	msleep(100);
 #else
 	if (dev_get_platdata(st->dev) == NULL)
 #  ifdef KERNEL_VERSION_4_X
