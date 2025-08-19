@@ -2286,20 +2286,23 @@ static int stop_rx_sequencer(struct uart_port *uport)
 		return -EBUSY;
 	}
 
+	if (atomic_read(&port->stop_rx_inprogress)) {
+		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
+			     "%s: already in progress, return\n", __func__);
+		return -EBUSY;
+	}
+	atomic_set(&port->stop_rx_inprogress, 1);
+
 	geni_status = geni_read_reg_nolog(uport->membase, SE_GENI_STATUS);
 	/* Possible stop rx is called multiple times. */
 	if (!(geni_status & S_GENI_CMD_ACTIVE)) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
 			     "%s: RX is Inactive, geni_sts: 0x%x\n",
 			     __func__, geni_status);
+		atomic_set(&port->stop_rx_inprogress, 0);
 		complete(&port->xfer);
 		return 0;
-	} else if (atomic_read(&port->stop_rx_inprogress)) {
-		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-			     "%s: Stop Rx is inprogress\n", __func__);
-		return -EBUSY;
 	}
-	atomic_set(&port->stop_rx_inprogress, 1);
 
 	if (port->gsi_mode) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
@@ -4804,7 +4807,7 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct msm_geni_serial_port *port = platform_get_drvdata(pdev);
-	int ret = 0;
+	int ret = 0, count = 0;
 	u32 geni_status = geni_read_reg_nolog(port->uport.membase,
 							SE_GENI_STATUS);
 
@@ -4873,6 +4876,26 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 	 */
 	if (port->wakeup_byte && port->wakeup_irq && port->port_state == UART_PORT_OPEN)
 		msm_geni_serial_allow_rx(port);
+
+	/*
+	 * stop_rx_sequencer can be invoked by framework via msm_geni_serial_stop_rx
+	 * independently. Before disabling clocks wait for stop_rx_sequencer to
+	 * complete to avoid unclocked register access
+	 */
+	while (atomic_read(&port->stop_rx_inprogress)) {
+		mdelay(10);
+		/* Poll for 100msecs */
+		if (++count > 10) {
+			/* Bailout since stop_rx_sequencer is still in progress */
+			UART_LOG_DBG(port->ipc_log_pwr, dev,
+				     "%s: return, stop_rx_seq busy\n", __func__);
+			enable_irq(port->uport.irq);
+			return -EBUSY;
+		}
+	}
+	if (count)
+		UART_LOG_DBG(port->ipc_log_pwr, dev,
+			     "%s: count=%d\n", __func__, count);
 
 	msm_geni_enable_disable_se_clk(&port->uport, false);
 	ret = se_geni_resources_off(&port->serial_rsc);
