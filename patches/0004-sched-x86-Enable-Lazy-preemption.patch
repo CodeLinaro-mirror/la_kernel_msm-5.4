@@ -12,6 +12,16 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  arch/x86/include/asm/thread_info.h |    6 ++++--
  2 files changed, 5 insertions(+), 2 deletions(-)
 
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -93,6 +93,7 @@ config X86
+ 	select ARCH_HAS_NMI_SAFE_THIS_CPU_OPS
+ 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
+ 	select ARCH_HAS_PMEM_API		if X86_64
++	select ARCH_HAS_PREEMPT_LAZY
+ 	select ARCH_HAS_PTE_DEVMAP		if X86_64
+ 	select ARCH_HAS_PTE_SPECIAL
+ 	select ARCH_HAS_HW_PTE_YOUNG
 --- a/arch/x86/include/asm/thread_info.h
 +++ b/arch/x86/include/asm/thread_info.h
 @@ -87,8 +87,9 @@ struct thread_info {
@@ -34,13 +44,3 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  #define _TIF_SINGLESTEP		(1 << TIF_SINGLESTEP)
  #define _TIF_SSBD		(1 << TIF_SSBD)
  #define _TIF_SPEC_IB		(1 << TIF_SPEC_IB)
---- a/arch/x86/Kconfig
-+++ b/arch/x86/Kconfig
-@@ -93,6 +93,7 @@ config X86
- 	select ARCH_HAS_NMI_SAFE_THIS_CPU_OPS
- 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
- 	select ARCH_HAS_PMEM_API		if X86_64
-+	select ARCH_HAS_PREEMPT_LAZY
- 	select ARCH_HAS_PTE_DEVMAP		if X86_64
- 	select ARCH_HAS_PTE_SPECIAL
- 	select ARCH_HAS_HW_PTE_YOUNG
