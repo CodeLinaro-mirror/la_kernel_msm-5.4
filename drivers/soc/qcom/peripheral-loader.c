@@ -23,6 +23,9 @@
 #include <linux/interrupt.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
+#include <linux/ioport.h>
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
 #include <soc/qcom/ramdump.h>
@@ -49,6 +52,7 @@
 #define pil_memset_io(d, c, count) memset_io(d, c, count)
 #endif
 
+#define MPSS_DEBUG_DUMP
 #define PIL_NUM_DESC		16
 #define MAX_LEN 96
 #define NUM_OF_ENCRYPTED_KEY	3
@@ -95,6 +99,7 @@ struct pil_mdt {
 struct pil_seg {
 	phys_addr_t paddr;
 	unsigned long sz;
+	unsigned int p_type;
 	size_t filesz;
 	int num;
 	struct list_head list;
@@ -461,6 +466,7 @@ int pil_do_ramdump(struct pil_desc *desc,
 	list_for_each_entry(seg, &priv->segs, list) {
 		s->address = seg->paddr;
 		s->size = seg->sz;
+		s->type = seg->p_type;
 		s++;
 		map_cnt++;
 	}
@@ -671,6 +677,7 @@ static struct pil_seg *pil_init_seg(const struct pil_desc *desc,
 	seg->filesz = phdr->p_filesz;
 	seg->sz = phdr->p_memsz;
 	seg->relocated = reloc;
+	seg->p_type = PT_LOAD;
 	INIT_LIST_HEAD(&seg->list);
 
 	return seg;
@@ -875,6 +882,48 @@ static int pil_cmp_seg(void *priv, struct list_head *a, struct list_head *b)
 	return ret;
 }
 
+#ifdef MPSS_DEBUG_DUMP
+static struct pil_seg* setup_mpss_debug(struct pil_desc *desc, int num)
+{
+	struct device_node *np = desc->dev->of_node;
+	struct device *dev = desc->dev;
+	struct device_node *mem_np;
+	struct pil_seg *seg;
+	struct resource res;
+	int ret;
+
+	mem_np = of_parse_phandle(np, "memory-region", 1);
+
+	if (!mem_np) {
+		dev_err(dev, "Failed to parse mpss_debug_mem from memory-region\n");
+		return ERR_PTR(-ENODEV);
+	}
+
+	ret = of_address_to_resource(mem_np, 0, &res);
+	of_node_put(mem_np);
+
+	if (ret) {
+		dev_err(dev, "Failed to get resource for mpss_debug_mem\n");
+		return ERR_PTR(ret);
+	}
+
+	dev_info(dev, "mpss_debug_mem: start = 0x%pa, size = 0x%lx\n",
+             &res.start, resource_size(&res));
+
+	seg = kmalloc(sizeof(*seg), GFP_KERNEL);
+	if (!seg)
+		return ERR_PTR(-ENOMEM);
+
+	seg->num = num;
+	seg->paddr = res.start;
+	seg->sz = resource_size(&res);
+	seg->p_type = PT_DYNAMIC;
+	INIT_LIST_HEAD(&seg->list);
+
+	return seg;
+}
+#endif
+
 static int pil_init_mmap(struct pil_desc *desc, const struct pil_mdt *mdt)
 {
 	struct pil_priv *priv = desc->priv;
@@ -907,6 +956,16 @@ static int pil_init_mmap(struct pil_desc *desc, const struct pil_mdt *mdt)
 		list_add_tail(&seg->list, &priv->segs);
 		priv->num_segs++;
 	}
+
+#ifdef MPSS_DEBUG_DUMP
+	struct pil_seg *seg_mpss;
+	seg_mpss = setup_mpss_debug(desc, priv->num_segs);
+	if (IS_ERR(seg_mpss))
+		return PTR_ERR(seg_mpss);
+	list_add_tail(&seg_mpss->list, &priv->segs);
+	priv->num_segs++;
+#endif
+
 	list_sort(NULL, &priv->segs, pil_cmp_seg);
 
 	return pil_init_entry_addr(priv, mdt);
@@ -1159,6 +1218,8 @@ static int pil_load_segs(struct pil_desc *desc)
 
 	/* Initialize and spawn a thread for each segment */
 	list_for_each_entry(seg, &desc->priv->segs, list) {
+		if(seg->p_type != PT_LOAD)
+			continue;
 		pil_seg_data[seg_id].desc = desc;
 		pil_seg_data[seg_id].seg = seg;
 
@@ -1174,6 +1235,8 @@ static int pil_load_segs(struct pil_desc *desc)
 	/* Wait for the parallel loads to finish */
 	seg_id = 0;
 	list_for_each_entry(seg, &desc->priv->segs, list) {
+		if(seg->p_type != PT_LOAD)
+			continue;
 		flush_work(&pil_seg_data[seg_id].load_seg_work);
 
 		/* Don't exit if one of the thread fails. Wait for others to
@@ -1336,9 +1399,10 @@ int pil_boot(struct pil_desc *desc)
 			goto err_deinit_image;
 	} else {
 		list_for_each_entry(seg, &desc->priv->segs, list) {
-			ret = pil_load_seg(desc, seg);
-			if (ret)
-				goto err_deinit_image;
+			if(seg->p_type == PT_LOAD)
+				ret = pil_load_seg(desc, seg);
+				if (ret)
+					goto err_deinit_image;
 		}
 	}
 
