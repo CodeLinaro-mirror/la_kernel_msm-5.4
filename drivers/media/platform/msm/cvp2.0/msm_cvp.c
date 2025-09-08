@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include "msm_cvp.h"
@@ -16,6 +16,45 @@ struct cvp_power_level {
 	unsigned long bw_sum;
 };
 
+void *get_sessObj_from_idr(struct msm_cvp_inst *inst)
+{
+	void *sessObj = NULL;
+	struct msm_cvp_core *core = NULL;
+
+	if (!inst || !inst->core) {
+		dprintk(CVP_ERR, "%s: invalid params\n", __func__);
+		return NULL;
+	}
+
+	core = inst->core;
+	mutex_lock(&core->idr_mtx);
+	sessObj = idr_find(&core->sess_idr, inst->sess_id);
+	mutex_unlock(&core->idr_mtx);
+	if (!sessObj)
+		dprintk(CVP_ERR, "%s: Could not find the sess obj for given idr id\n",
+				__func__);
+
+	return sessObj;
+}
+
+u32 get_sessId_from_idr(void *session)
+{
+	void *ptr = NULL;
+	u32 sess_id = 0;
+	struct msm_cvp_core *core = NULL;
+
+	core = list_first_entry(&cvp_driver->cores, struct msm_cvp_core, list);
+	mutex_lock(&core->idr_mtx);
+	idr_for_each_entry(&core->sess_idr, ptr, sess_id) {
+		if (ptr == session) {
+			mutex_unlock(&core->idr_mtx);
+			return sess_id;
+		}
+	}
+	mutex_unlock(&core->idr_mtx);
+	return -1;
+}
+
 void print_internal_buffer(u32 tag, const char *str,
 		struct msm_cvp_inst *inst, struct msm_cvp_internal_buffer *cbuf)
 {
@@ -25,13 +64,13 @@ void print_internal_buffer(u32 tag, const char *str,
 	if (cbuf->smem.dma_buf) {
 		dprintk(tag,
 		"%s: %x : idx %2d fd %d off %d size %d flags %#x iova %#x",
-		str, hash32_ptr(inst->session), cbuf->buf.index, cbuf->buf.fd,
+		str, inst->sess_id, cbuf->buf.index, cbuf->buf.fd,
 		cbuf->buf.offset,  cbuf->buf.size,
 		cbuf->buf.flags, cbuf->smem.device_addr);
 	} else {
 		dprintk(tag,
 		"%s: %x : idx %2d fd %d off %d size %d flags %#x iova %#x",
-		str, hash32_ptr(inst->session), cbuf->buf.index, cbuf->buf.fd,
+		str, inst->sess_id, cbuf->buf.index, cbuf->buf.fd,
 		cbuf->buf.offset, cbuf->buf.size, cbuf->buf.flags,
 		cbuf->smem.device_addr);
 	}
@@ -72,7 +111,7 @@ static int msm_cvp_get_session_info(struct msm_cvp_inst *inst,
 		return -ECONNRESET;
 
 	s->cur_cmd_type = CVP_KMD_GET_SESSION_INFO;
-	session->session_id = hash32_ptr(inst->session);
+	session->session_id = inst->sess_id;
 	dprintk(CVP_DBG, "%s: id 0x%x\n", __func__, session->session_id);
 
 	s->cur_cmd_type = 0;
@@ -204,7 +243,7 @@ static int msm_cvp_map_buf_dsp(struct msm_cvp_inst *inst,
 	}
 
 	if (buf->index) {
-		rc = cvp_dsp_register_buffer(hash32_ptr(session), buf->fd,
+		rc = cvp_dsp_register_buffer(inst->sess_id, buf->fd,
 			cbuf->smem.dma_buf->size, buf->size, buf->offset,
 			buf->index, (uint32_t)cbuf->smem.device_addr);
 		if (rc) {
@@ -269,7 +308,7 @@ static int msm_cvp_unmap_buf_dsp(struct msm_cvp_inst *inst,
 	}
 
 	if (buf->index) {
-		rc = cvp_dsp_deregister_buffer(hash32_ptr(session), buf->fd,
+		rc = cvp_dsp_deregister_buffer(inst->sess_id, buf->fd,
 			cbuf->smem.dma_buf->size, buf->size, buf->offset,
 			buf->index, (uint32_t)cbuf->smem.device_addr);
 		if (rc) {
@@ -2238,10 +2277,10 @@ int msm_cvp_session_deinit(struct msm_cvp_inst *inst)
 		return -EINVAL;
 	}
 	dprintk(CVP_DBG, "%s: inst %pK (%#x)\n", __func__,
-		inst, hash32_ptr(inst->session));
+		inst, inst->sess_id);
 
-	session = (struct cvp_hal_session *)inst->session;
-	if (!session)
+	session = (struct cvp_hal_session *)get_sessObj_from_idr(inst);
+	if (!session || session != inst->session)
 		return rc;
 
 	rc = msm_cvp_comm_try_state(inst, MSM_CVP_CLOSE_DONE);
@@ -2316,7 +2355,7 @@ int msm_cvp_session_init(struct msm_cvp_inst *inst)
 	}
 
 	dprintk(CVP_DBG, "%s: inst %pK (%#x)\n", __func__,
-		inst, hash32_ptr(inst->session));
+		inst, inst->sess_id);
 
 	/* set default frequency */
 	inst->clk_data.core_id = 0;
