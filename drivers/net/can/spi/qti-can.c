@@ -50,6 +50,7 @@
 #define CAN_FD_PACKET_DATA		32
 #define CAN_FD_PACKET_SIZE		46
 #define CAN_STANDARD_PACKET_SIZE	22
+#define STRING_TERMIINATING_INDEX	47
 
 static int static_pos_checksum_en;
 static int dynamic_pos_checksum_en;
@@ -569,6 +570,8 @@ static int qti_can_process_response(struct qti_can *priv_data,
 
 		dev_info(&priv_data->spidev->dev, "fw %d.%d.%d\n",
 			 fw_resp->maj, fw_resp->min, fw_resp->sub_min);
+		/*It will help in exiting while printing string on console. */
+		fw_resp->ver[STRING_TERMIINATING_INDEX] = '\0';
 		dev_info(&priv_data->spidev->dev, "fw string %s\n",
 			 fw_resp->ver);
 	} else if (resp->cmd  == CMD_GET_FW_BR_VERSION) {

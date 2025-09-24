@@ -233,6 +233,7 @@ int fastrpc_mmap_remove(struct fastrpc_file *fl, uintptr_t va,
 		if (map->raddr == va &&
 			map->raddr + map->len == va + len &&
 			map->refs == 1 &&
+			/* Remove if only one reference map and no context map */
 			!map->ctx_refs) {
 			match = map;
 			hlist_del_init(&map->hn);

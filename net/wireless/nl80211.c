@@ -33,7 +33,7 @@
 static int nl80211_crypto_settings(struct cfg80211_registered_device *rdev,
 				   struct genl_info *info,
 				   struct cfg80211_crypto_settings *settings,
-				   int cipher_limit);
+				   int cipher_limit, enum nl80211_commands cmd);
 
 /* the netlink family */
 static struct genl_family nl80211_fam;
@@ -2574,6 +2574,11 @@ static int nl80211_send_wiphy(struct cfg80211_registered_device *rdev,
 		if (nl80211_put_tid_config_support(rdev, msg))
 			goto nla_put_failure;
 
+		if (rdev->wiphy.max_num_akms_connect &&
+			nla_put_u8(msg, NL80211_ATTR_MAX_NUM_AKMS_CONNECT,
+				    rdev->wiphy.max_num_akms_connect))
+			goto nla_put_failure;
+
 		/* done */
 		state->split_start = 0;
 		break;
@@ -3848,10 +3853,7 @@ static void get_key_callback(void *c, struct key_params *params)
 	struct nlattr *key;
 	struct get_key_cookie *cookie = c;
 
-	if ((params->key &&
-	     nla_put(cookie->msg, NL80211_ATTR_KEY_DATA,
-		     params->key_len, params->key)) ||
-	    (params->seq &&
+	if ((params->seq &&
 	     nla_put(cookie->msg, NL80211_ATTR_KEY_SEQ,
 		     params->seq_len, params->seq)) ||
 	    (params->cipher &&
@@ -3863,10 +3865,7 @@ static void get_key_callback(void *c, struct key_params *params)
 	if (!key)
 		goto nla_put_failure;
 
-	if ((params->key &&
-	     nla_put(cookie->msg, NL80211_KEY_DATA,
-		     params->key_len, params->key)) ||
-	    (params->seq &&
+	if ((params->seq &&
 	     nla_put(cookie->msg, NL80211_KEY_SEQ,
 		     params->seq_len, params->seq)) ||
 	    (params->cipher &&
@@ -4899,7 +4898,8 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
 		params.auth_type = NL80211_AUTHTYPE_AUTOMATIC;
 
 	err = nl80211_crypto_settings(rdev, info, &params.crypto,
-				      NL80211_MAX_NR_CIPHER_SUITES);
+				      NL80211_MAX_NR_CIPHER_SUITES,
+				      NL80211_CMD_START_AP);
 	if (err)
 		return err;
 
@@ -8238,7 +8238,8 @@ nl80211_parse_sched_scan(struct wiphy *wiphy, struct wireless_dev *wdev,
 		return ERR_PTR(-ENOMEM);
 
 	if (n_ssids)
-		request->ssids = (void *)&request->channels[n_channels];
+		request->ssids = (void *)request +
+			struct_size(request, channels, n_channels);
 	request->n_ssids = n_ssids;
 	if (ie_len) {
 		if (n_ssids)
@@ -9298,7 +9299,7 @@ static int validate_pae_over_nl80211(struct cfg80211_registered_device *rdev,
 static int nl80211_crypto_settings(struct cfg80211_registered_device *rdev,
 				   struct genl_info *info,
 				   struct cfg80211_crypto_settings *settings,
-				   int cipher_limit)
+				   int cipher_limit, enum nl80211_commands cmd)
 {
 	memset(settings, 0, sizeof(*settings));
 
@@ -9368,18 +9369,28 @@ static int nl80211_crypto_settings(struct cfg80211_registered_device *rdev,
 	if (info->attrs[NL80211_ATTR_AKM_SUITES]) {
 		void *data;
 		int len;
+		u8 n_akm_suites;
 
 		data = nla_data(info->attrs[NL80211_ATTR_AKM_SUITES]);
 		len = nla_len(info->attrs[NL80211_ATTR_AKM_SUITES]);
-		settings->n_akm_suites = len / sizeof(u32);
+		n_akm_suites = len / sizeof(u32);
 
 		if (len % sizeof(u32))
 			return -EINVAL;
 
-		if (settings->n_akm_suites > NL80211_MAX_NR_AKM_SUITES)
-			return -EINVAL;
+		if (cmd == NL80211_CMD_CONNECT && rdev->wiphy.max_num_akms_connect) {
+			if (n_akm_suites > rdev->wiphy.max_num_akms_connect)
+				return -EINVAL;
 
-		memcpy(settings->akm_suites, data, len);
+			settings->n_connect_akm_suites = n_akm_suites;
+			settings->connect_akm_suites = data;
+		} else {
+			if (n_akm_suites > NL80211_MAX_NR_AKM_SUITES)
+				return -EINVAL;
+
+			settings->n_akm_suites = n_akm_suites;
+			memcpy(settings->akm_suites, data, len);
+		}
 	}
 
 	if (info->attrs[NL80211_ATTR_PMK]) {
@@ -9507,7 +9518,8 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 			nla_data(info->attrs[NL80211_ATTR_FILS_NONCES]);
 	}
 
-	err = nl80211_crypto_settings(rdev, info, &req.crypto, 1);
+	err = nl80211_crypto_settings(rdev, info, &req.crypto, 1,
+					 NL80211_CMD_ASSOCIATE);
 	if (!err) {
 		wdev_lock(dev->ieee80211_ptr);
 
@@ -10138,7 +10150,8 @@ static int nl80211_connect(struct sk_buff *skb, struct genl_info *info)
 	connect.want_1x = info->attrs[NL80211_ATTR_WANT_1X_4WAY_HS];
 
 	err = nl80211_crypto_settings(rdev, info, &connect.crypto,
-				      NL80211_MAX_NR_CIPHER_SUITES);
+				      NL80211_MAX_NR_CIPHER_SUITES,
+				      NL80211_CMD_CONNECT);
 	if (err)
 		return err;
 
@@ -12246,6 +12259,8 @@ static int nl80211_set_coalesce(struct sk_buff *skb, struct genl_info *info)
 error:
 	for (i = 0; i < new_coalesce.n_rules; i++) {
 		tmp_rule = &new_coalesce.rules[i];
+		if (!tmp_rule)
+			continue;
 		for (j = 0; j < tmp_rule->n_patterns; j++)
 			kfree(tmp_rule->patterns[j].mask);
 		kfree(tmp_rule->patterns);
