@@ -4623,6 +4623,8 @@ static int _qcom_ethqos_probe(void *arg)
 	plat_dat->force_thresh_dma_mode_q0_en =
 		of_property_read_bool(np,
 				      "snps,force_thresh_dma_mode_q0");
+	if (of_device_is_compatible(np, "qcom,qcs404-ethqos"))
+		plat_dat->rx_clk_runs_in_lpi = 1;
 	plat_dat->early_eth = ethqos->early_eth_enabled;
 	plat_dat->handle_prv_ioctl = ethqos_handle_prv_ioctl;
 	plat_dat->handle_prv_ioctl_filter_ipv4 = ethqos_handle_prv_ioctl_filter_ipv4;

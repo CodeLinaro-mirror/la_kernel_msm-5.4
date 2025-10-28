@@ -280,12 +280,8 @@ out:
 		kernel_halt();
 	}
 
-	if (v->mode == DM_VERITY_MODE_RESTART) {
-#ifdef CONFIG_DM_VERITY_AVB
-		dm_verity_avb_error_handler();
-#endif
+	if (v->mode == DM_VERITY_MODE_RESTART)
 		kernel_restart("dm-verity device corrupted");
-	}
 
 	return 1;
 }

@@ -1160,6 +1160,7 @@ static void qcom_glink_handle_intent(struct qcom_glink *glink,
 	channel = qcom_glink_channel_ref_get(glink, true, cid);
 	if (!channel) {
 		dev_err(glink->dev, "intents for non-existing channel\n");
+		qcom_glink_rx_advance(glink, ALIGN(msglen, 8));
 		return;
 	}
 
