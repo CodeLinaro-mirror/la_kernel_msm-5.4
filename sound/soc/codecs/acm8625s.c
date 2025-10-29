@@ -607,6 +607,37 @@ static const struct regmap_config acm8625s_regmap = {
 	.cache_type	= REGCACHE_NONE,
 };
 
+static void acm8625s_firmware_cb(const struct firmware *cfg, void *data)
+{
+	struct acm8625s_priv *acm8625s = (struct acm8625s_priv *)data;
+	struct i2c_client *client = acm8625s->i2c;
+	struct device *dev = &client->dev;
+
+	if (!cfg) {
+		dev_err(dev, "acm8625s get firmware failed\n");
+		acm8625s->dsp_cfg_len = 0;
+		acm8625s->dsp_cfg_data = NULL;
+		return;
+	}
+
+	if ((cfg->size < 2) || (cfg->size & 1)) {
+		dev_err(dev, "acm8625s firmware is invalid\n");
+		acm8625s->dsp_cfg_len = 0;
+		acm8625s->dsp_cfg_data = NULL;
+		goto fail;
+	}
+
+	acm8625s->dsp_cfg_len = cfg->size;
+	acm8625s->dsp_cfg_data = devm_kmalloc(dev, cfg->size, GFP_KERNEL);
+	if (!acm8625s->dsp_cfg_data)
+		goto fail;
+
+	memcpy(acm8625s->dsp_cfg_data, cfg->data, cfg->size);
+
+fail:
+	release_firmware(cfg);
+}
+
 static int acm8625s_i2c_probe(struct i2c_client *i2c)
 {
 	struct device *dev = &i2c->dev;
@@ -615,7 +646,6 @@ static int acm8625s_i2c_probe(struct i2c_client *i2c)
 
 	char filename[128];
 	const char *config_name;
-	const struct firmware *fw;
 	int ret;
 
 	dev_info(dev, "acm8625s_i2c_probe(): Start I2C Probe\n");
@@ -654,27 +684,12 @@ static int acm8625s_i2c_probe(struct i2c_client *i2c)
 
 	snprintf(filename, sizeof(filename), "acm8625s_dsp_%s.bin",
 		 config_name);
-	ret = request_firmware(&fw, filename, dev);
-	if (!ret) {
-		if ((fw->size < 2) || (fw->size & 1)) {
-			dev_err(dev, "firmware is invalid\n");
-			release_firmware(fw);
-			return -EINVAL;
-		}
 
-		acm8625s->dsp_cfg_len = fw->size;
-		acm8625s->dsp_cfg_data = devm_kmalloc(dev, fw->size, GFP_KERNEL);
-		if (!acm8625s->dsp_cfg_data) {
-			release_firmware(fw);
-			return -ENOMEM;
-		}
-		memcpy(acm8625s->dsp_cfg_data, fw->data, fw->size);
-
-		release_firmware(fw);
-	} else {
-		acm8625s->dsp_cfg_len = 0;
-		acm8625s->dsp_cfg_data = NULL;
-	}
+	ret = request_firmware_nowait(THIS_MODULE, true,
+		filename, dev, GFP_KERNEL, acm8625s,
+		acm8625s_firmware_cb);
+	if (ret)
+		dev_err(dev, "Failed to invoke firmware loader: %d\n", ret);
 
 	acm8625s->vol[0] = ACM8625S_VOLUME_MINUS_20DB;
 	acm8625s->vol[1] = ACM8625S_VOLUME_MINUS_20DB;
