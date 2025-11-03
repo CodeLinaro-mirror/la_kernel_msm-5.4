@@ -43,13 +43,8 @@ struct _ax_buikin_setting AX88179_BULKIN_SIZE[] = {
 };
 const struct ethtool_ops ax88179_ethtool_ops = {
 	.get_drvinfo	= ax_get_drvinfo,
-#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
-	.get_settings	= ax_get_settings,
-	.set_settings	= ax_set_settings,
-#else
 	.get_link_ksettings = ax_get_link_ksettings,
 	.set_link_ksettings = ax_set_link_ksettings,
-#endif
 	.get_link	= ethtool_op_get_link,
 	.get_msglevel	= ax_get_msglevel,
 	.set_msglevel	= ax_set_msglevel,
@@ -80,10 +75,8 @@ int ax88179_read_eeprom(struct ax_device *axdev, struct _ax_ioctl_command *info)
 		buf = kmalloc_array(info->size, sizeof(unsigned short),
 				    GFP_KERNEL);
 		if (!buf) {
-#if KERNEL_VERSION(2, 6, 34) <= LINUX_VERSION_CODE
 			netdev_err(axdev->netdev,
 				   "Cannot allocate memory for buffer");
-#endif
 			return -ENOMEM;
 		}
 	} else {
@@ -159,10 +152,8 @@ int ax88179_write_eeprom(struct ax_device *axdev,
 		buf = kmalloc_array(info->size, sizeof(unsigned short),
 				    GFP_KERNEL);
 		if (!buf) {
-#if KERNEL_VERSION(2, 6, 34) <= LINUX_VERSION_CODE
 			netdev_err(axdev->netdev,
 				   "Cannot allocate memory for buffer");
-#endif
 			return -ENOMEM;
 		}
 		if (copy_from_user(buf, info->buf,
@@ -276,45 +267,6 @@ IOCTRL_TABLE ax88179_tbl[] = {
 	ax88179_write_eeprom,
 };
 
-#if KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE
-int ax88179_siocdevprivate(struct net_device *netdev, struct ifreq *rq,
-			   void __user *udata, int cmd)
-{
-	struct ax_device *axdev = netdev_priv(netdev);
-	struct _ax_ioctl_command info;
-	struct _ax_ioctl_command *uptr =
-				(struct _ax_ioctl_command *) rq->ifr_data;
-	int ret = 0;
-
-	switch (cmd) {
-	case AX_PRIVATE:
-		if (copy_from_user(&info, uptr,
-				   sizeof(struct _ax_ioctl_command)))
-			return -EFAULT;
-
-		if ((*ax88179_tbl[info.ioctl_cmd])(axdev, &info) < 0) {
-			netdev_info(netdev, "ax88179_tbl, return -EFAULT");
-			return -EFAULT;
-		}
-
-		if (copy_to_user(uptr, &info, sizeof(struct _ax_ioctl_command)))
-			return -EFAULT;
-
-		break;
-	default:
-		ret = -EOPNOTSUPP;
-	}
-
-	return ret;
-}
-
-int ax88179_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
-{
-	struct ax_device *axdev = netdev_priv(netdev);
-
-	return generic_mii_ioctl(&axdev->mii, if_mii(rq), cmd, NULL);
-}
-#else
 int ax88179_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 {
 	struct ax_device *axdev = netdev_priv(netdev);
@@ -342,7 +294,6 @@ int ax88179_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	}
 	return 0;
 }
-#endif
 
 void ax88179_set_multicast(struct net_device *net)
 {
@@ -353,11 +304,7 @@ void ax88179_set_multicast(struct net_device *net)
 	if (!test_bit(AX_ENABLE, &axdev->flags))
 		return;
 
-#if KERNEL_VERSION(2, 6, 35) > LINUX_VERSION_CODE
-	mc_count = net->mc_count;
-#else
 	mc_count = netdev_mc_count(net);
-#endif
 
 	axdev->rxctl = (AX_RX_CTL_START | AX_RX_CTL_AB);
 
@@ -369,20 +316,6 @@ void ax88179_set_multicast(struct net_device *net)
 	} else if (mc_count == 0) {
 	} else {
 		u32 crc_bits;
-#if KERNEL_VERSION(2, 6, 35) > LINUX_VERSION_CODE
-		struct dev_mc_list *mc_list = net->mc_list;
-		int i = 0;
-
-		memset(m_filter, 0, AX_MCAST_FILTER_SIZE);
-
-		for (i = 0; i < net->mc_count; i++) {
-			crc_bits = ether_crc(ETH_ALEN,
-					     mc_list->dmi_addr) >> 26;
-			*(m_filter + (crc_bits >> 3)) |=
-				1 << (crc_bits & 7);
-			mc_list = mc_list->next;
-		}
-#else
 		struct netdev_hw_addr *ha = NULL;
 
 		memset(m_filter, 0, AX_MCAST_FILTER_SIZE);
@@ -391,7 +324,7 @@ void ax88179_set_multicast(struct net_device *net)
 			*(m_filter + (crc_bits >> 3)) |=
 				1 << (crc_bits & 7);
 		}
-#endif
+
 		ax_write_cmd_async(axdev, AX_ACCESS_MAC,
 					AX_MULTI_FILTER_ARRY,
 					AX_MCAST_FILTER_SIZE,
@@ -1148,11 +1081,7 @@ static int ax88179_system_resume(struct ax_device *axdev)
 
 	reg16 = 0;
 	ax_write_cmd_nopm(axdev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL, 2, 2, &reg16);
-#if KERNEL_VERSION(2, 6, 36) <= LINUX_VERSION_CODE
 	usleep_range(1000, 2000);
-#else
-	msleep(20);
-#endif
 	reg16 = AX_PHYPWR_RSTCTL_IPRL;
 	ax_write_cmd_nopm(axdev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL, 2, 2, &reg16);
 	msleep(200);

@@ -1535,6 +1535,9 @@ EXPORT_SYMBOL(of_get_coresight_cti_data);
 static int cti_probe(struct amba_device *adev, const struct amba_id *id)
 {
 	int ret;
+	const char *dt_name;
+	char name_prefix[64];
+	char *pos;
 	struct device *dev = &adev->dev;
 	struct coresight_platform_data *pdata;
 	struct cti_drvdata *drvdata;
@@ -1568,9 +1571,14 @@ static int cti_probe(struct amba_device *adev, const struct amba_id *id)
 		drvdata->cpu = -1;
 	of_node_put(cpu_node);
 
-	if (drvdata->cpu >= 0)
-		desc.name = devm_kasprintf(dev, GFP_KERNEL,
-						"coresight-cti-cpu%d", drvdata->cpu);
+	if (drvdata->cpu >= 0
+		&& !of_property_read_string(dev->of_node, "coresight-name", &dt_name)
+		&& (pos = strstr(dt_name, "cpu"))
+		&& (strlen(dt_name) < sizeof(name_prefix))) {
+
+		snprintf(name_prefix, pos + strlen("cpu") - dt_name + 1, "%s", dt_name);
+		desc.name = devm_kasprintf(dev, GFP_KERNEL, "%s%d", name_prefix, drvdata->cpu);
+	}
 	else
 		desc.name = coresight_alloc_device_name(&cti_devs, dev);
 
