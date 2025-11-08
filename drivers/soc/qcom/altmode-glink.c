@@ -40,6 +40,9 @@
 		pr_debug(fmt, ##__VA_ARGS__); \
 	} while (0)
 
+bool ktm5000_customize_enable = false;
+bool isKtm5000ChangeNeeded = false;
+
 struct usbc_notify_ind_msg {
 	struct pmic_glink_hdr	hdr;
 	u8			payload[NOTIFY_PAYLOAD_SIZE];
@@ -578,6 +581,24 @@ static int altmode_callback(void *priv, void *data, size_t len)
 
 		altmode_dbg("Payload: %*ph\n", NOTIFY_PAYLOAD_SIZE,
 				notify_msg->payload);
+		/*
+		 * Due to hardware design reasons, in USB peripheral mode, the communication
+		 * between PD chip with always on power supply and PMIC'CC is abnormal, when
+		 * HPD happened. Therefore, we need to customize payload data on AIO for workaround
+		 */
+		if (ktm5000_customize_enable) {
+			if (!(notify_msg->payload[8] & 0x40)) {
+				if (!isKtm5000ChangeNeeded) {
+					isKtm5000ChangeNeeded = true;
+				}
+				else {
+					notify_msg->payload[8] |= 0x40;
+					isKtm5000ChangeNeeded = false;
+					altmode_dbg("Payload customize need change\n");
+				}
+			} else
+				isKtm5000ChangeNeeded = false;
+		}
 
 		cancel_work_sync(&amclient->client_cb_work);
 		memcpy(&amclient->msg, notify_msg->payload,
@@ -740,6 +761,13 @@ static int altmode_probe(struct platform_device *pdev)
 	altmode_ipc_log = ipc_log_context_create(NUM_LOG_PAGES, "altmode", 0);
 	if (!altmode_ipc_log)
 		dev_warn(dev, "Error in creating ipc_log_context\n");
+
+	/*
+	 * add bool flag for AIO, Used to restart pmic CC communication
+	 */
+	if (of_property_read_bool(dev->of_node, "qcom,ktm5000-customize-enable")) {
+		ktm5000_customize_enable = true;
+	}
 
 	altmode_notify_clients(amdev);
 
