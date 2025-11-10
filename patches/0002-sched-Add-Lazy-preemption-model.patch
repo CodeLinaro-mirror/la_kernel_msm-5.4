@@ -314,7 +314,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		return;
  	}
  	/*
-@@ -8961,7 +8961,7 @@ static void check_preempt_wakeup_fair(st
+@@ -8964,7 +8964,7 @@ static void check_preempt_wakeup_fair(st
  	return;
  
  preempt:
