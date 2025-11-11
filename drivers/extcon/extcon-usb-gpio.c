@@ -21,7 +21,6 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/delay.h>
 
-#define INIT_STATE_DELAY	50
 #define USB_GPIO_DEBOUNCE_MS	20	/* ms */
 static bool usb_enable_flag = false;
 
@@ -219,16 +218,9 @@ static int usb_extcon_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, info);
 	device_set_wakeup_capable(&pdev->dev, true);
 
-	if(usb_enable_flag) {
-		if(info->id_gpiod) {
-			if (gpiod_get_value_cansleep(info->id_gpiod)) {
-				queue_delayed_work(system_power_efficient_wq, &info->wq_detcable,(INIT_STATE_DELAY*HZ));
-			}
-		}
-	} else {
-		/* Perform initial detection */
-		usb_extcon_detect_cable(&info->wq_detcable.work);
-	}
+	/* Perform initial detection */
+	usb_extcon_detect_cable(&info->wq_detcable.work);
+
 	return 0;
 }
 

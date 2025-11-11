@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/bitmap.h>
@@ -150,6 +150,9 @@
 
 /* Required for polling for 100 msecs */
 #define POLL_WAIT_TIMEOUT_MSEC	100
+
+/* Required for polling for 25 msecs */
+#define CMD_DONE_TIMEOUT_MSEC	25
 
 /*
  * Number of iterrations required while polling
@@ -593,15 +596,15 @@ static bool geni_wait_for_cmd_done(struct uart_port *uport, bool is_irq_masked)
 			}
 		}
 	} else {
-		/* Waiting for 10 milli second for interrupt to be fired */
+		/* Waiting for 25 milli second for interrupt to be fired */
 		if (msm_port->m_cmd)
 			timeout = wait_for_completion_timeout
 					(&msm_port->m_cmd_timeout,
-				msecs_to_jiffies(POLL_WAIT_TIMEOUT_MSEC));
+				msecs_to_jiffies(CMD_DONE_TIMEOUT_MSEC));
 		else if (msm_port->s_cmd)
 			timeout = wait_for_completion_timeout
 					(&msm_port->s_cmd_timeout,
-				msecs_to_jiffies(POLL_WAIT_TIMEOUT_MSEC));
+				msecs_to_jiffies(CMD_DONE_TIMEOUT_MSEC));
 	}
 
 	return timeout ? 0 : 1;
@@ -651,13 +654,6 @@ static void dump_ipc(struct uart_port *uport, void *ipc_ctx, char *prefix,
 	scnprintf(data, sizeof(data), "%s[0x%.10x:%d] : %s",
 		  prefix, (unsigned int)addr, size, buf);
 	UART_LOG_DBG(ipc_ctx, uport->dev, "%s : %s\n", __func__, data);
-}
-
-static bool device_pending_suspend(struct uart_port *uport)
-{
-	int usage_count = atomic_read(&uport->dev->power.usage_count);
-
-	return (pm_runtime_status_suspended(uport->dev) && !usage_count);
 }
 
 static bool check_transfers_inflight(struct uart_port *uport)
@@ -844,7 +840,7 @@ static void msm_geni_serial_break_ctl(struct uart_port *uport, int ctl)
 	struct msm_geni_serial_port *port = GET_DEV_PORT(uport);
 	int ret = 0;
 
-	if (!uart_console(uport) && device_pending_suspend(uport)) {
+	if (!uart_console(uport) && !pm_runtime_active(uport->dev)) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
 			     "%s.Device is suspended, %s\n",
 			     __func__, current->comm);
@@ -883,9 +879,9 @@ static unsigned int msm_geni_serial_get_mctrl(struct uart_port *uport)
 		return 0;
 	}
 
-	if (!uart_console(uport) && device_pending_suspend(uport)) {
+	if (!uart_console(uport) && !pm_runtime_active(uport->dev)) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-			     "%s.Device is suspended, %s\n",
+			     "%s.Device is not in active state, %s\n",
 			     __func__, current->comm);
 		return TIOCM_DSR | TIOCM_CAR | TIOCM_CTS;
 	}
@@ -918,9 +914,9 @@ static void msm_geni_serial_set_mctrl(struct uart_port *uport,
 		return;
 	}
 
-	if (device_pending_suspend(uport)) {
+	if (!uart_console(uport) && !pm_runtime_active(uport->dev)) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-			     "%s.Device is suspended, %s: mctrl=0x%x\n",
+			     "%s.Device is not in active state, %s: mctrl=0x%x\n",
 			     __func__, current->comm, mctrl);
 		return;
 	}
@@ -2142,10 +2138,9 @@ static void msm_geni_serial_stop_tx(struct uart_port *uport)
 {
 	struct msm_geni_serial_port *port = GET_DEV_PORT(uport);
 
-	if (!uart_console(uport) && device_pending_suspend(uport)) {
-		dev_err(uport->dev, "%s.Device is suspended.\n", __func__);
+	if (!uart_console(uport) && !pm_runtime_active(uport->dev)) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-			     "%s.Device is suspended.\n", __func__);
+			     "%s.Device is not in active state.\n", __func__);
 		return;
 	}
 	stop_tx_sequencer(uport);
@@ -2219,10 +2214,9 @@ static void msm_geni_serial_start_rx(struct uart_port *uport)
 {
 	struct msm_geni_serial_port *port = GET_DEV_PORT(uport);
 
-	if (!uart_console(uport) && device_pending_suspend(uport)) {
-		dev_err(uport->dev, "%s.Device is suspended.\n", __func__);
+	if (!uart_console(uport) && !pm_runtime_active(uport->dev)) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-			     "%s.Device is suspended.\n", __func__);
+			     "%s.Device is not in active state.\n", __func__);
 		return;
 	}
 	start_rx_sequencer(&port->uport);
@@ -2295,20 +2289,23 @@ static int stop_rx_sequencer(struct uart_port *uport)
 		return -EBUSY;
 	}
 
+	if (atomic_read(&port->stop_rx_inprogress)) {
+		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
+			     "%s: already in progress, return\n", __func__);
+		return -EBUSY;
+	}
+	atomic_set(&port->stop_rx_inprogress, 1);
+
 	geni_status = geni_read_reg_nolog(uport->membase, SE_GENI_STATUS);
 	/* Possible stop rx is called multiple times. */
 	if (!(geni_status & S_GENI_CMD_ACTIVE)) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
 			     "%s: RX is Inactive, geni_sts: 0x%x\n",
 			     __func__, geni_status);
+		atomic_set(&port->stop_rx_inprogress, 0);
 		complete(&port->xfer);
 		return 0;
-	} else if (atomic_read(&port->stop_rx_inprogress)) {
-		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-			     "%s: Stop Rx is inprogress\n", __func__);
-		return -EBUSY;
 	}
-	atomic_set(&port->stop_rx_inprogress, 1);
 
 	if (port->gsi_mode) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
@@ -2490,9 +2487,9 @@ static void msm_geni_serial_stop_rx(struct uart_port *uport)
 	struct msm_geni_serial_port *port = GET_DEV_PORT(uport);
 	int ret;
 
-	if (!uart_console(uport) && device_pending_suspend(uport)) {
+	if (!uart_console(uport) && !pm_runtime_active(uport->dev)) {
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-			     "%s.Device is suspended.\n", __func__);
+			     "%s.Device is not in active state..\n", __func__);
 		complete(&port->xfer);
 		return;
 	}
@@ -3797,7 +3794,7 @@ static unsigned int msm_geni_serial_tx_empty(struct uart_port *uport)
 	unsigned int is_tx_empty = 1;
 	struct msm_geni_serial_port *port = GET_DEV_PORT(uport);
 
-	if (!uart_console(uport) && device_pending_suspend(uport))
+	if (!uart_console(uport) && !pm_runtime_active(uport->dev))
 		return 1;
 
 	if (port->xfer_mode == SE_DMA)
@@ -4813,7 +4810,7 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct msm_geni_serial_port *port = platform_get_drvdata(pdev);
-	int ret = 0;
+	int ret = 0, count = 0;
 	u32 geni_status = geni_read_reg_nolog(port->uport.membase,
 							SE_GENI_STATUS);
 
@@ -4882,6 +4879,26 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 	 */
 	if (port->wakeup_byte && port->wakeup_irq && port->port_state == UART_PORT_OPEN)
 		msm_geni_serial_allow_rx(port);
+
+	/*
+	 * stop_rx_sequencer can be invoked by framework via msm_geni_serial_stop_rx
+	 * independently. Before disabling clocks wait for stop_rx_sequencer to
+	 * complete to avoid unclocked register access
+	 */
+	while (atomic_read(&port->stop_rx_inprogress)) {
+		mdelay(10);
+		/* Poll for 100msecs */
+		if (++count > 10) {
+			/* Bailout since stop_rx_sequencer is still in progress */
+			UART_LOG_DBG(port->ipc_log_pwr, dev,
+				     "%s: return, stop_rx_seq busy\n", __func__);
+			enable_irq(port->uport.irq);
+			return -EBUSY;
+		}
+	}
+	if (count)
+		UART_LOG_DBG(port->ipc_log_pwr, dev,
+			     "%s: count=%d\n", __func__, count);
 
 	msm_geni_enable_disable_se_clk(&port->uport, false);
 	ret = se_geni_resources_off(&port->serial_rsc);

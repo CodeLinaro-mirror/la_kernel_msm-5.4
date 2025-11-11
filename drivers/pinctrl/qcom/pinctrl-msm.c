@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013, Sony Mobile Communications AB.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -666,6 +666,12 @@ static int msm_gpio_init_valid_mask(struct gpio_chip *gc,
 	struct property *prop;
 	const __be32 *p;
 	u16 *tmp;
+	bool dt_high_priority = false;
+
+	dt_high_priority = of_property_read_bool(pctrl->dev->of_node, "qcom,reserved-dt-high-priority");
+	if(dt_high_priority){
+		reserved = NULL;
+	}
 
 	/* Driver provided reserved list overrides DT and ACPI */
 	if (reserved) {
@@ -689,6 +695,10 @@ static int msm_gpio_init_valid_mask(struct gpio_chip *gc,
 				return -EINVAL;
 			}
 			clear_bit(i, valid_mask);
+		}
+
+		if(dt_high_priority){
+			return 0;
 		}
 	}
 

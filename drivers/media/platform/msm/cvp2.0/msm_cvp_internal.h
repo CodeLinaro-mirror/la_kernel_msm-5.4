@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef _MSM_CVP_INTERNAL_H_
@@ -311,6 +311,8 @@ struct msm_cvp_core {
 	unsigned long curr_freq;
 	struct msm_cvp_core_ops *core_ops;
 	atomic64_t kernel_trans_id;
+	struct idr sess_idr;
+	struct mutex idr_mtx;
 };
 
 struct msm_cvp_inst {
@@ -321,6 +323,7 @@ struct msm_cvp_inst {
 	struct cvp_session_queue session_queue;
 	struct cvp_session_event event_handler;
 	void *session;
+	u32 sess_id;
 	enum instance_state state;
 	struct msm_cvp_list freqs;
 	struct msm_cvp_list persistbufs;
