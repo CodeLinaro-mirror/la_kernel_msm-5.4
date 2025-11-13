@@ -1783,7 +1783,7 @@ static ssize_t suspend_resume_ipa_offload(struct device *dev,
 	if (kstrtos8(user_buf, 0, &input))
 		return -EFAULT;
 
-	if (!eth_ipa_ctx.ipa_offload_link_down) {
+	if (qcom_ethqos_is_phy_link_up(ethqos)) {
 		if (input == 0) {
 			ethqos_ipa_offload_event_handler(&qtype1,
 							 EV_USR_RESUME);
@@ -3501,9 +3501,10 @@ void ethqos_ipa_offload_event_handler(void *data,
 	case EV_DPM_SUSPEND:
 		if (eth_ipa_ctx.ipa_offload_conn)
 			*(int *)data = false;
-		else
+		else {
 			*(int *)data = true;
-
+			eth_ipa_ctx.ipa_offload_link_down = true;
+		}
 		break;
 	case EV_USR_SUSPEND:
 		type = (*(int *)data);
