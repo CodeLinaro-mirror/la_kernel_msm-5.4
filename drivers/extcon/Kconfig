@@ -187,4 +187,10 @@ config EXTCON_USBC_CROS_EC
 	  Say Y here to enable USB Type C cable detection extcon support when
 	  using Chrome OS EC based USB Type-C ports.
 
+config KTM5000B0T
+	tristate "DP2HDMI functionality"
+	help
+	  If you say yes here you get support for DP to HDMI functionality.At the same time,
+	  USB 3.0 will be configured with concurrent USB 3.0 2lane + DP 2lane mode
+
 endif

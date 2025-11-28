@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
- * Copyright (c) 2024-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/module.h>
@@ -578,6 +577,7 @@ struct dwc3_msm {
 
 	bool			perf_mode;
 	bool			disable_host_mode_pm;
+	bool			in_concurrent_mode;
 	struct gpio_desc	*oc_gpiod;
 	int			oc_irq;
 	struct device_node *dwc3_node;
@@ -4626,6 +4626,33 @@ static inline int role_switch_init(struct dwc3_msm *mdwc)
 	return 0;
 }
 
+int dwc3_msm_set_ss_mode(struct device *dev, bool mode)
+{
+	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
+	struct dwc3 *dwc = NULL;
+
+	if (mdwc == NULL) {
+		pr_err("dwc3-msm is not initialized yet.\n");
+		return -EAGAIN;
+	}
+	if (mdwc->dwc3)
+		dwc = platform_get_drvdata(mdwc->dwc3);
+	if (dwc == NULL) {
+		pr_err("dwc3 controller is not initialized yet.\n");
+		return -EAGAIN;
+	}
+	if (mode) {//device
+		mdwc->vbus_active = true;
+		mdwc->id_state = DWC3_ID_FLOAT;
+	} else {
+		mdwc->vbus_active = false;
+		mdwc->id_state = DWC3_ID_GROUND;
+	}
+	dwc3_ext_event_notify(mdwc);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(dwc3_msm_set_ss_mode);
+
 static ssize_t orientation_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -5397,6 +5424,9 @@ static int dwc3_msm_parse_params(struct dwc3_msm *mdwc)
 
 	mdwc->disable_host_mode_pm = of_property_read_bool(node,
 				"qcom,disable-host-mode-pm");
+
+	mdwc->in_concurrent_mode = of_property_read_bool(node,
+				"qcom,usb-dp-concurrent-mode-enable");
 
 	/* use default as nominal bus voting */
 	mdwc->default_bus_vote = BUS_VOTE_NOMINAL;
@@ -6190,7 +6220,7 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 		dbg_event(0xFF, "StopHost gsync",
 			atomic_read(&mdwc->dev->power.usage_count));
 		notify_hs_phys_disconnect(mdwc);
-		if (dwc->maximum_speed >= USB_SPEED_SUPER) {
+		if ((dwc->maximum_speed >= USB_SPEED_SUPER) && !mdwc->in_concurrent_mode) {
 			notify_ss_phys_disconnect(mdwc);
 			mdwc->ss_phy[0]->flags &= ~PHY_USB_DP_CONCURRENT_MODE;
 			usb_redriver_notify_disconnect(mdwc->redriver);
@@ -6312,7 +6342,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		 */
 		dwc->err_evt_seen = false;
 		usb_phy_notify_disconnect(mdwc->hs_phy[0], USB_SPEED_HIGH);
-		if (dwc->maximum_speed >= USB_SPEED_SUPER) {
+		if ((dwc->maximum_speed >= USB_SPEED_SUPER) && !mdwc->in_concurrent_mode) {
 			usb_phy_notify_disconnect(mdwc->ss_phy[0], USB_SPEED_SUPER);
 			mdwc->ss_phy[0]->flags &= ~PHY_USB_DP_CONCURRENT_MODE;
 			usb_redriver_notify_disconnect(mdwc->redriver);

@@ -359,7 +359,7 @@ static void acm8625s_refresh(struct acm8625s_priv *acm8625s)
 		regmap_write(rm, REG_DEVICE_STATE, DEVICE_STATE_MUTE | DEVICE_STATE_PLAY);
 	} else {
 		/* clear digital soft-mute */
-		regmap_write(rm, REG_DEVICE_STATE, 0 | DEVICE_STATE_PLAY);
+		regmap_write(rm, REG_DEVICE_STATE, DEVICE_STATE_PLAY);
 	}
 }
 
