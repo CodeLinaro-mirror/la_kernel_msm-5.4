@@ -18,6 +18,13 @@
 #include <linux/module.h>
 #include <linux/ratelimit.h>
 
+#ifdef TTY_LOW_LATENCY
+
+#include <uapi/linux/sched/types.h>
+#include <linux/sched/rt.h>
+static DEFINE_KTHREAD_WORKER(tty_buffer_worker);
+#define TTY_PRIO
+#endif
 
 #define MIN_TTYB_SIZE	256
 #define TTYB_ALIGN_MASK	255
@@ -72,7 +79,12 @@ void tty_buffer_unlock_exclusive(struct tty_port *port)
 	atomic_dec(&buf->priority);
 	mutex_unlock(&buf->lock);
 	if (restart)
+#ifdef TTY_LOW_LATENCY
+		kthread_queue_work(&tty_buffer_worker,
+			&buf->kwork);
+#else
 		queue_work(system_unbound_wq, &buf->work);
+#endif
 }
 EXPORT_SYMBOL_GPL(tty_buffer_unlock_exclusive);
 
@@ -477,11 +489,19 @@ receive_buf(struct tty_port *port, struct tty_buffer *head, int count)
  *		 'consumer'
  */
 
+#ifdef TTY_LOW_LATENCY
+static void flush_to_ldisc(struct kthread_work *work)
+#else
 static void flush_to_ldisc(struct work_struct *work)
+#endif
 {
-	struct tty_port *port = container_of(work, struct tty_port, buf.work);
-	struct tty_bufhead *buf = &port->buf;
 
+#ifdef TTY_LOW_LATENCY
+	struct tty_port *port = container_of(work, struct tty_port, buf.kwork);
+#else
+	struct tty_port *port = container_of(work, struct tty_port, buf.work);
+#endif
+	struct tty_bufhead *buf = &port->buf;
 	mutex_lock(&buf->lock);
 
 	while (1) {
@@ -548,9 +568,34 @@ void tty_flip_buffer_push(struct tty_port *port)
 	struct tty_bufhead *buf = &port->buf;
 
 	tty_flip_buffer_commit(buf->tail);
+
+#ifdef TTY_LOW_LATENCY
+	kthread_queue_work(&tty_buffer_worker,
+			&buf->kwork);
+#else
 	queue_work(system_unbound_wq, &buf->work);
+#endif
 }
 EXPORT_SYMBOL(tty_flip_buffer_push);
+
+#ifdef TTY_LOW_LATENCY
+void tty_kthread_run()
+{
+
+	struct task_struct *task;
+	task = kthread_run(kthread_worker_fn,
+			&tty_buffer_worker, "tty_kthread", 1);
+	if (IS_ERR(task)) {
+		printk("error creating task\n", __func__);
+	}
+
+#ifdef TTY_PRIO
+	/* Use same default priority as threaded irq handlers */
+	struct sched_param param = { .sched_priority = MAX_USER_RT_PRIO/2 };
+	sched_setscheduler(task, SCHED_FIFO, &param);
+#endif
+}
+#endif
 
 /**
  * tty_insert_flip_string_and_push_buffer - add characters to the tty buffer and
@@ -578,7 +623,12 @@ int tty_insert_flip_string_and_push_buffer(struct tty_port *port,
 		tty_flip_buffer_commit(buf->tail);
 	spin_unlock_irqrestore(&port->lock, flags);
 
+#ifdef TTY_LOW_LATENCY
+	kthread_queue_work(&tty_buffer_worker,
+			&buf->kwork);
+#else
 	queue_work(system_unbound_wq, &buf->work);
+#endif
 
 	return size;
 }
@@ -602,7 +652,11 @@ void tty_buffer_init(struct tty_port *port)
 	init_llist_head(&buf->free);
 	atomic_set(&buf->mem_used, 0);
 	atomic_set(&buf->priority, 0);
+#ifdef TTY_LOW_LATENCY
+	kthread_init_work(&buf->kwork, flush_to_ldisc);
+#else
 	INIT_WORK(&buf->work, flush_to_ldisc);
+#endif
 	buf->mem_limit = TTYB_DEFAULT_MEM_LIMIT;
 }
 
@@ -631,17 +685,33 @@ void tty_buffer_set_lock_subclass(struct tty_port *port)
 
 bool tty_buffer_restart_work(struct tty_port *port)
 {
+#ifdef TTY_LOW_LATENCY
+	struct tty_bufhead *buf = &port->buf;
+	return kthread_queue_work(&tty_buffer_worker,
+			&buf->kwork);
+#else
 	return queue_work(system_unbound_wq, &port->buf.work);
+#endif
 }
 
 bool tty_buffer_cancel_work(struct tty_port *port)
 {
+#ifdef TTY_LOW_LATENCY
+	struct tty_bufhead *buf = &port->buf;
+	return kthread_cancel_work_sync(&buf->kwork);
+#else
 	return cancel_work_sync(&port->buf.work);
+#endif
 }
 
 void tty_buffer_flush_work(struct tty_port *port)
 {
+#ifdef TTY_LOW_LATENCY
+	struct tty_bufhead *buf = &port->buf;
+	kthread_flush_work(&buf->kwork);
+#else
 	flush_work(&port->buf.work);
+#endif
 }
 
 void tty_schedule_flip(struct tty_port *port)

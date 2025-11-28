@@ -2,6 +2,8 @@
 #ifndef _LINUX_TTY_H
 #define _LINUX_TTY_H
 
+#define TTY_LOW_LATENCY
+
 #include <linux/fs.h>
 #include <linux/major.h>
 #include <linux/termios.h>
@@ -14,6 +16,10 @@
 #include <uapi/linux/tty.h>
 #include <linux/rwsem.h>
 #include <linux/llist.h>
+#ifdef TTY_LOW_LATENCY
+#include <linux/kthread.h>
+void tty_kthread_run(void);
+#endif
 
 
 /*
@@ -85,6 +91,9 @@ static inline char *flag_buf_ptr(struct tty_buffer *b, int ofs)
 struct tty_bufhead {
 	struct tty_buffer *head;	/* Queue head */
 	struct work_struct work;
+#ifdef TTY_LOW_LATENCY
+	struct kthread_work kwork;
+#endif
 	struct mutex	   lock;
 	atomic_t	   priority;
 	struct tty_buffer sentinel;
