@@ -1157,8 +1157,7 @@ static int stmmac_init_phy(struct net_device *dev)
 
 #ifndef DEFER_ENABLE_INTERRUPTS
 	if (!priv->plat->mac2mac_en && !priv->plat->phy_intr_en) {
-		ret = priv->plat->phy_intr_enable(priv);
-		if (ret)
+		if (priv->plat->phy_intr_enable(priv))
 			pr_alert("qcom-ethqos: Unable to enable PHY interrupt\n");
 		else
 			priv->plat->phy_intr_en = true;
