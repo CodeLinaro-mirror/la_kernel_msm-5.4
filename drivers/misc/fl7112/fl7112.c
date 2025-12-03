@@ -12,7 +12,6 @@
 #include <linux/i2c.h>
 #include <linux/gpio.h>
 #include <linux/export.h>
-#include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/of_gpio.h>
 #include <linux/of_graph.h>
@@ -22,51 +21,7 @@
 #include <linux/string.h>
 #include "fl7112.h"
 
-
-#define FL7112_CNT	1
-#define FL7112_NAME	"fl7112"
 #define FL7112_VERSION_NUM  (uint32_t)0x0104410c
-
-struct fl7112 {
-	struct device *dev;
-	u8 i2c_addr;
-
-	u8 i2c_wbuf[FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK];
-	u8 i2c_rbuf[FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK];
-	struct i2c_client *i2c_client;
-	enum fw_upgrade_status fw_status;
-	uint32_t version;
-    struct workqueue_struct *wq;  /* upgrade queue */
-    struct work_struct wk;        /* upgrade work */
-    u32 reset_pin;   /*reset pin */
-    u32 pwr_1v2;
-    u32 pwr_3v3;
-};
-
-struct fl7112_reg_cfg {
-	u8 reg;
-	u8 val;
-};
-
-struct fl7112_dev {
-	dev_t devid;
-	struct cdev cdev;
-	struct class *class;
-	struct device *device;
-	struct device_node	*nd;
-	int major;
-	void *private_data;
-};
-static struct fl7112_dev fl7112dev;
-
-static int fl7112_read(struct fl7112 *pdata, int reg, char *buf, u32 size);
-static bool fl7112_mtpread_firmware(struct fl7112 *pdata,int address,BYTE* DataBuffer,int DataBufferLength);
-static bool fl7112_mtpwrite_firmware(struct fl7112 *pdata,int Address,const u8* DataBuffer,int DataBufferLength,bool* IsError,bool* IsBusy);
-static void fl7112_mtppowermodedisable(struct fl7112 *pdata);
-static bool fl7112_mtpwriteunlock(struct fl7112 *pdata);
-static void fl7112_mtpwritelock(struct fl7112 *pdata);
-static bool fl7112_mtpcheckstatus(struct fl7112 *pdata,bool* IsError,bool* IsBusy);
-static void fl7112_reset(struct fl7112 *pdata);
 
 /*
  * Write one reg with more values;
@@ -373,7 +328,7 @@ static bool fl7112_mtppagesetup(struct fl7112 *pdata,
             goto Exit;
         }
     }else{
-        bStatus = TRUE;
+        bStatus = true;
     }
 
 Exit:
@@ -751,47 +706,134 @@ static void fl7112_reset(struct fl7112 *pdata)
 void fl7112_chip_reset(struct fl7112 *pdata)
 {
 
-    /*  LT7211_RST - H |  gpio_40 - L */
-    gpio_direction_output(pdata->reset_pin, 0);
-    /* sleep */
-    msleep(100);
-    /*  LT7211_RST - L |  gpio_40 - H */
-    gpio_direction_output(pdata->reset_pin, 1);
+	/*  LT7211_RST - H |  gpio_40 - L */
+	gpio_direction_output(pdata->reset_pin, 0);
+	msleep(20);
+	/*  LT7211_RST - L |  gpio_40 - H */
+	gpio_direction_output(pdata->reset_pin, 1);
+	/* sleep */
+	msleep(100);
+	/*  LT7211_RST - H |  gpio_40 - L */
+	gpio_direction_output(pdata->reset_pin, 0);
 }
 
 static int fl7112_parse_dt(struct device *dev,struct fl7112 *pdata)
 {
-    int ret = 0;
-    struct device_node *np = dev->of_node;
+	int ret = 0;
+	struct device_node *np = dev->of_node;
 
-    /* reset gpio */
-    pdata->reset_pin = of_get_named_gpio(np, "fl7112,reset-gpio", 0);
-	if (gpio_is_valid(pdata->reset_pin)) {
-		ret = gpio_request(pdata->reset_pin, "reset_pin");
-	} else {
+	/* reset gpio */
+	pdata->reset_pin = of_get_named_gpio(np, "fl7112,reset-gpio", 0);
+	if (!gpio_is_valid(pdata->reset_pin)) {
 		dev_err(dev, "%s: gpio %d is invalid!", __func__, pdata->reset_pin);
-        // return -1;
+		return -EINVAL;
 	}
 
-    /* pwr 1v2 */
-    pdata->pwr_1v2 = of_get_named_gpio(np, "fl7112,pwr-1v2", 0);
-	if (gpio_is_valid(pdata->pwr_1v2)) {
-		ret = gpio_request(pdata->pwr_1v2, "pwr_1v2");
-	} else {
+	/* pwr 1v2 */
+	pdata->pwr_1v2 = of_get_named_gpio(np, "fl7112,pwr-1v2", 0);
+	if (!gpio_is_valid(pdata->pwr_1v2)) {
 		dev_err(dev, "%s: gpio %d is invalid!", __func__, pdata->pwr_1v2);
-        return -1;
+		return -EINVAL;
 	}
 
-    /* pwr 3v3 */
-    pdata->pwr_3v3 = of_get_named_gpio(np, "fl7112,pwr-3v3", 0);
-	if (gpio_is_valid(pdata->pwr_3v3)) {
-		ret = gpio_request(pdata->pwr_3v3, "pwr_3v3");
-	} else {
+	/* pwr 3v3 */
+	pdata->pwr_3v3 = of_get_named_gpio(np, "fl7112,pwr-3v3", 0);
+	if (!gpio_is_valid(pdata->pwr_3v3)) {
 		dev_err(dev, "%s: gpio %d is invalid!", __func__, pdata->pwr_3v3);
-        return -1;
+		return -EINVAL;
 	}
 
-    return ret;
+	return ret;
+}
+
+static int fl7112_gpio_configure(struct fl7112 *pdata, bool on)
+{
+	int ret = 0;
+
+	if (!gpio_is_valid(pdata->pwr_3v3)) {
+		pr_err("Invalid GPIO for pwr_3v3\n");
+		return -EINVAL;
+	}
+
+	if (!gpio_is_valid(pdata->pwr_1v2)) {
+		pr_err("Invalid GPIO for pwr_1v2\n");
+		return -EINVAL;
+	}
+
+	if (on) {
+	ret = gpio_request(pdata->pwr_3v3,
+		"fl7112-3p3-gpio");
+	if (ret) {
+		pr_err("fl7112 3p3 gpio request failed\n");
+		goto error;
+	}
+
+	ret = gpio_direction_output(pdata->pwr_3v3, 0);
+	if (ret) {
+		pr_err("fl7112 3p3 en gpio direction failed\n");
+		goto pwr_3p3_error;
+	}
+
+	ret = gpio_request(pdata->pwr_1v2,
+		"fl7112-1p2-gpio");
+	if (ret) {
+		pr_err("fl7112 1p2 gpio request failed\n");
+		goto pwr_3p3_error;
+	}
+
+	ret = gpio_direction_output(pdata->pwr_1v2, 0);
+	if (ret) {
+		pr_err("fl7112 1p2 gpio direction failed\n");
+		goto pwr_1p2_error;
+	}
+
+		ret = gpio_request(pdata->reset_pin,
+			"fl7112-reset-gpio");
+		if (ret) {
+			pr_err("fl7112 reset gpio request failed\n");
+			goto pwr_1p2_error;
+		}
+
+		ret = gpio_direction_output(pdata->reset_pin, 1);
+		if (ret) {
+			pr_err("fl7112 reset gpio direction failed\n");
+			goto reset_error;
+		}
+	} else {
+		gpio_free(pdata->reset_pin);
+		if (gpio_is_valid(pdata->pwr_1v2))
+			gpio_free(pdata->pwr_1v2);
+		if (gpio_is_valid(pdata->pwr_3v3))
+			gpio_free(pdata->pwr_3v3);
+	}
+
+	return ret;
+
+reset_error:
+	gpio_free(pdata->reset_pin);
+pwr_1p2_error:
+	gpio_free(pdata->pwr_1v2);
+pwr_3p3_error:
+	gpio_free(pdata->pwr_3v3);
+error:
+	return ret;
+}
+
+static void fl7112_enable_vreg(struct fl7112 *pdata, int enable)
+{
+	if (enable) {
+		if (gpio_is_valid(pdata->pwr_3v3))
+			gpio_set_value(pdata->pwr_3v3, 1);
+
+		if (gpio_is_valid(pdata->pwr_1v2))
+			gpio_set_value(pdata->pwr_1v2, 1);
+	} else {
+		if (gpio_is_valid(pdata->pwr_3v3))
+			gpio_set_value(pdata->pwr_3v3, 0);
+
+		if (gpio_is_valid(pdata->pwr_1v2))
+			gpio_set_value(pdata->pwr_1v2, 0);
+	}
 }
 
 /* func :  Recovery InformationBlock
@@ -1052,21 +1094,25 @@ static bool fl7112_firmware_upgrade(struct fl7112 *pdata,
     }
 
     if (data_len != 0x6300) {
-        pr_info("fl7112 FW total size is incorrect\n");
+        pr_debug("fl7112 FW total size is incorrect\n");
         return false;
     }
 
     dataBufferInformationBlock =  (u8*)cfg->data;
     dataBufferInformationBlock += FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK;
-    dataBufferFirmwareReadBack = (BYTE*)kmalloc(FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK, GFP_KERNEL);
-    memset(dataBufferFirmwareReadBack, 0, FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK);
+    dataBufferFirmwareReadBack = kzalloc(FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK, GFP_KERNEL);
+    if (!dataBufferFirmwareReadBack)
+        return false;
 
-    dataBufferInformationBlockReadBack = (BYTE*)kmalloc(FL7112_MTP_MAX_SIZE_OF_INFORMATION_BLOCK, GFP_KERNEL);
-    memset(dataBufferInformationBlockReadBack, 0, FL7112_MTP_MAX_SIZE_OF_INFORMATION_BLOCK);
+    dataBufferInformationBlockReadBack = kzalloc(FL7112_MTP_MAX_SIZE_OF_INFORMATION_BLOCK, GFP_KERNEL);
+    if (!dataBufferInformationBlockReadBack) {
+        kfree(dataBufferFirmwareReadBack);
+        return false;
+    }
 
 	pdata->fw_status = UPDATE_RUNNING;
 
-    pr_info("fl7112 Firmware total size 0x%x\n", data_len);
+    pr_debug("fl7112 Firmware total size 0x%x\n", data_len);
 
     /* 1. Hold MCU Reset */
     bStatus = i2cex_bitset(pdata,
@@ -1077,7 +1123,7 @@ static bool fl7112_firmware_upgrade(struct fl7112 *pdata,
         ret = false;
 		goto Exit;
     }else{
-        pr_info("fl7112 Hold MCU Reset OK! \n");
+        pr_debug("fl7112 Hold MCU Reset OK! \n");
     }
 
     /* 2. Firmware write */
@@ -1087,11 +1133,11 @@ static bool fl7112_firmware_upgrade(struct fl7112 *pdata,
                                         FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK,
                                         &isError,&isBusy );
     if(!bStatus){
-        pr_info("fl7112 firmware write NG! \n");
+        pr_debug("fl7112 firmware write NG! \n");
         ret = false;
         goto Exit;
     }else{
-        pr_info("fl7112 firmware write OK! \n");
+        pr_debug("fl7112 firmware write OK! \n");
     }
 
     /* 3. read back and compare firmware  */
@@ -1105,8 +1151,8 @@ static bool fl7112_firmware_upgrade(struct fl7112 *pdata,
 
     bStatus = memcmp(cfg->data, dataBufferFirmwareReadBack,
                      FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK );
-    if(0 == bStatus){
-        pr_info("fl7112 firmware Compare OK! \n");
+    if(!bStatus){
+        pr_debug("fl7112 firmware Compare OK! \n");
     }else{
         pr_err("fl7112 %s error line:%d - firmware Compare NG!\n", __func__, __LINE__);
         ret = false;
@@ -1125,7 +1171,7 @@ static bool fl7112_firmware_upgrade(struct fl7112 *pdata,
         ret = false;
 		goto Exit;
 	}else{
-        pr_info("fl7112 Information block write OK! \n");
+        pr_debug("fl7112 Information block write OK! \n");
     }
 
     /* 5. read back and compare informationblock */
@@ -1142,14 +1188,14 @@ static bool fl7112_firmware_upgrade(struct fl7112 *pdata,
     bStatus = memcmp( dataBufferInformationBlock,
                         dataBufferInformationBlockReadBack,
                         FL7112_MTP_MAX_SIZE_OF_INFORMATION_BLOCK );
-    if(0 == bStatus){
-        pr_info("fl7112 InformationBlock Compare OK! \n");
+    if(!bStatus){
+        pr_debug("fl7112 InformationBlock Compare OK! \n");
     }else{
         pr_err("fl7112 %s error line:%d - InformationBlock Compare NG!\n", __func__, __LINE__);
         ret = false;
     }
 
-     pr_info("fl7112 FW upgrade success!\n");
+     pr_debug("fl7112 FW upgrade success!\n");
 
 Exit:
     /* Release MCU Reset */
@@ -1171,16 +1217,20 @@ static void fl7112_firmware_cb(const struct firmware *cfg, void *data)
 		return;
 	}
 
-    /* FW upgrade */
+	/* FW upgrade */
 	if(!fl7112_firmware_upgrade(pdata, cfg)){
-       pr_err("fl7112 upgrade firmware failed\n");
-    }
+		pr_err("fl7112 upgrade firmware failed\n");
+		fl7112_enable_vreg(pdata, false);
+		msleep(20);
+		fl7112_enable_vreg(pdata, true);
+		fl7112_chip_reset(pdata);
+	} else {
+		msleep(3000);
+		/* reset chip */
+		fl7112_reset(pdata);
+	}
 
-    msleep(3000);
-    /* reset chip */
-    fl7112_reset(pdata);
-
-    /* release */
+	/* release */
 	release_firmware(cfg);
 }
 
@@ -1193,7 +1243,7 @@ BYTE fl7112_read_addr_info(struct fl7112 *pdata,int addr)
 	if (bStatus){
         pr_err("fl7112 read addr 0x%x failed, ret: %d\n",bStatus);
     }else{
-        pr_info("fl7112 read addr 0x%x : %x\n",addr,rDat);
+        pr_debug("fl7112 read addr 0x%x : %x\n",addr,rDat);
     }
 
 	return rDat;
@@ -1291,20 +1341,20 @@ bool fl7112_read_fw_version(struct fl7112 *pdata, uint32_t* Version)
 
 static void fl7112_fw_upgrade_work(struct work_struct *work)
 {
-	int32_t rc = 0;
+	int32_t ret = 0;
     struct fl7112 *pdata = container_of(work, struct fl7112,wk);
 
-	pr_info("[fl7112] %s enter\n",__func__);
+	pr_debug("[fl7112] %s enter\n",__func__);
 
     if (!pdata) {
 		pr_err("fl7112 %s : pdata is NULL\n",__func__);
 		return ;
 	}
 
-	rc = request_firmware_nowait(THIS_MODULE, true,
+	ret = request_firmware_nowait(THIS_MODULE, true,
 				"fl7112_fw.bin", &pdata->i2c_client->dev, GFP_KERNEL,
 				pdata, fl7112_firmware_cb);
-	if (rc < 0){
+	if (ret < 0){
 		pr_err("[fl7112] request firmware upgrade failed\n");
 	}
 
@@ -1316,7 +1366,7 @@ static int fl7112_probe(struct i2c_client *client, const struct i2c_device_id *i
 	struct fl7112 *pdata;
 	int ret = 0;
 
-	pr_info("fl7112_probe enter!\n");
+	pr_debug("fl7112_probe enter!\n");
 
 	if (!client || !client->dev.of_node) {
 		pr_err("invalid input\n");
@@ -1336,23 +1386,21 @@ static int fl7112_probe(struct i2c_client *client, const struct i2c_device_id *i
 	ret = fl7112_parse_dt(&client->dev, pdata);
 	if (ret) {
 		pr_err("Fl7112 Parse Device Tree NG! %d\n",ret);
-	}else{
-		/* reset GPIO */
-		if(gpio_direction_output(pdata->reset_pin, 0)){
-			pr_err("Fl7112 reset ctl failed!\n");
-		}
-		/* 1v2 - HIGH */
-		if(gpio_direction_output(pdata->pwr_1v2, 1)){
-			pr_err("Fl7112 pwr 1v2 failed!\n");
-		}
-		/* 3v3 - HIGH */
-		if(gpio_direction_output(pdata->pwr_3v3, 1)){
-			pr_err("Fl7112 pwr 3v3 failed!\n");
-		}
-    }
+		goto err_dt_parse;
+	}
 
 	pdata->dev = &client->dev;
 	pdata->i2c_client = client;
+
+	ret = fl7112_gpio_configure(pdata, true);
+	if (ret) {
+		pr_err("failed to configure GPIOs\n");
+		goto err_dt_parse;
+	}
+
+	fl7112_enable_vreg(pdata, true);
+
+	fl7112_chip_reset(pdata);
 
 	i2c_set_clientdata(client, pdata);
 	dev_set_drvdata(&client->dev, pdata);
@@ -1361,39 +1409,50 @@ static int fl7112_probe(struct i2c_client *client, const struct i2c_device_id *i
     pdata->wq = create_singlethread_workqueue("fl7112_wq");
     if (!pdata->wq){
         pr_err("fl7112 create workqueue failed!\n");
+	goto err_sysfs_init;
 	}
     /*init upgrade work */
     INIT_WORK(&(pdata->wk), fl7112_fw_upgrade_work);
 
-#if FL7112_MTP_AUTO_UPGRADE
     /* read fw version */
     if(fl7112_read_fw_version(pdata, &pdata->version)){
         /* compare version */
         if(FL7112_VERSION_NUM != pdata->version){
-            pr_info("%s: check version NG [0x%08x] expect version [0x%08x]\n", __func__,pdata->version,FL7112_VERSION_NUM);
+            pr_debug("%s: check version NG [0x%08x] expect version [0x%08x]\n", __func__,pdata->version,FL7112_VERSION_NUM);
             /* need to upgrade */
             queue_work(pdata->wq, &(pdata->wk));
         }else{
             /* version correct and nothing todo */
-            pr_info("%s: check version OK [0x%08x]\n", __func__,pdata->version);
+            pr_debug("%s: check version OK [0x%08x]\n", __func__,pdata->version);
             fl7112_reset(pdata);
         }
     }else{
         pr_err("fl7112 read FW version failed!\n");
-    }
-#endif
+		goto err_sysfs_init;
+	}
 
 	return 0;
+
+err_sysfs_init:
+	fl7112_gpio_configure(pdata, false);
+err_dt_parse:
+	return ret;
+
 }
 
 static int fl7112_remove(struct i2c_client *client)
 {
-	cdev_del(&fl7112dev.cdev);
-	unregister_chrdev_region(fl7112dev.devid, FL7112_CNT);
+	int ret = 0;
+	struct fl7112 *pdata = i2c_get_clientdata(client);
 
-	device_destroy(fl7112dev.class, fl7112dev.devid);
-	class_destroy(fl7112dev.class);
-	return 0;
+	if ((!pdata) || (!pdata->wq))
+		return -EINVAL;
+
+	destroy_workqueue(pdata->wq);
+
+	ret = fl7112_gpio_configure(pdata, false);
+
+	return ret;
 }
 
 static const struct of_device_id fl7112_of_match[] = {
