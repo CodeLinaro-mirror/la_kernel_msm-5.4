@@ -951,7 +951,7 @@ static int msm_nand_flash_onfi_probe(struct msm_nand_info *info)
 	devid  = (flash->flash_id >> 8) & 0xFF;
 
 	/* hack for 8 x 8 JSC MCP part */
-	if (manid == 0xAD && devid == 0xA3)
+	if (manid == 0xAD && devid == 0xA3 && onfi_param_page_ptr->number_of_logical_units == 1)
 		flash->density = flash->density * 2;
 
 	/*
