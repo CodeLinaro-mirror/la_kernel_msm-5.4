@@ -3489,6 +3489,9 @@ void console_sysfs_notify(void)
 int __init tty_init(void)
 {
 	tty_sysctl_init();
+#ifdef TTY_LOW_LATENCY
+	tty_kthread_run();
+#endif
 	cdev_init(&tty_cdev, &tty_fops);
 	if (cdev_add(&tty_cdev, MKDEV(TTYAUX_MAJOR, 0), 1) ||
 	    register_chrdev_region(MKDEV(TTYAUX_MAJOR, 0), 1, "/dev/tty") < 0)
