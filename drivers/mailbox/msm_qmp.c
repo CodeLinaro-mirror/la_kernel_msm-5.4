@@ -950,7 +950,9 @@ static int qmp_edge_init(struct platform_device *pdev)
 	mdev->mbox_client.knows_txdone = true;
 	mdev->mbox_chan = mbox_request_channel(&mdev->mbox_client, 0);
 	if (IS_ERR(mdev->mbox_chan)) {
-		if (PTR_ERR(mdev->mbox_chan) != -ENODEV)
+		if ((PTR_ERR(mdev->mbox_chan) != -ENODEV) &&
+			(PTR_ERR(mdev->mbox_chan) != -ENOENT) &&
+			(PTR_ERR(mdev->mbox_chan) != -EINVAL))
 			return PTR_ERR(mdev->mbox_chan);
 
 		mdev->mbox_chan = NULL;
