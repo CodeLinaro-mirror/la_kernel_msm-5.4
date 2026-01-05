@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/bitmap.h>
@@ -294,6 +294,8 @@ struct msm_geni_serial_port {
 	struct ktermios *current_termios;
 	bool resuming_from_deep_sleep;
 	bool shutdown_in_progress;
+	bool is_deep_sleep;
+	bool is_gsi_resume;
 };
 
 static struct uart_port *uart_console_uport;
@@ -4427,6 +4429,8 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 	device_create_file(uport->dev, &dev_attr_ver_info);
 	msm_geni_serial_debug_init(uport, is_console);
 	dev_port->port_setup = false;
+	dev_port->is_gsi_resume = true;
+	dev_port->is_deep_sleep = false;
 
 	dev_port->uart_error = UART_ERROR_DEFAULT;
 
@@ -4531,6 +4535,48 @@ static void msm_geni_serial_allow_rx(struct msm_geni_serial_port *port)
 }
 
 #ifdef CONFIG_PM
+static int msm_geni_uart_gsi_suspend_resume(struct msm_geni_serial_port *msm_port,
+					    bool suspend)
+{
+	int tx_ret;
+
+	/*
+	 * Do dma operations only for tx channel here, as it takes care of rx channel
+	 * also internally from the GPI driver functions. if we call for both channels,
+	 * will see channels in wrong state due to double operations.
+	 */
+	if (msm_port->gsi->tx_c != NULL) {
+		if (msm_port->is_deep_sleep)
+			msm_port->gsi->tx_ev.cmd = MSM_GPI_DEEP_SLEEP_INIT;
+
+		if (suspend) {
+			/*
+			 * For deep sleep need to restore the config similar to the probe,
+			 * hence using MSM_GPI_DEEP_SLEEP_INIT flag, in gpi_resume it will
+			 * do similar to the probe. After this we should set this flag to
+			 * MSM_GPI_DEFAULT, means gpi probe state is restored.
+			 */
+			tx_ret = dmaengine_pause(msm_port->gsi->tx_c);
+		} else {
+			tx_ret = dmaengine_resume(msm_port->gsi->tx_c);
+			if (msm_port->is_deep_sleep) {
+				msm_port->gsi->tx_ev.cmd = MSM_GPI_DEFAULT;
+				msm_port->is_deep_sleep = false;
+			}
+		}
+		IPC_LOG_MSG(msm_port->ipc_log_pwr,"%s: Deepsleep %d suspend %d\n",
+			     __func__, msm_port->is_deep_sleep, suspend);
+
+		if (tx_ret) {
+			IPC_LOG_MSG(msm_port->ipc_log_pwr,
+				"%s failed: tx:%d status:%d\n", __func__, tx_ret, suspend);
+			return -EINVAL;
+		}
+}
+
+return 0;
+}
+
 static int msm_geni_serial_runtime_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -4562,6 +4608,17 @@ static int msm_geni_serial_runtime_suspend(struct device *dev)
 			return -EBUSY;
 		}
 	}
+
+	if (port->gsi_mode && port->is_gsi_resume) {
+		IPC_LOG_MSG(port->ipc_log_pwr, "%s: GSI suspend\n", __func__);
+		ret = msm_geni_uart_gsi_suspend_resume(port, true);
+		if (ret) {
+			dev_err(dev, "%s: Error ret %d\n", __func__, ret);
+			return ret;
+		}
+		port->is_gsi_resume = false;
+	}
+
 	/*
 	 * Stop Rx.
 	 * Disable Interrupt
@@ -4656,6 +4713,15 @@ static int msm_geni_serial_runtime_resume(struct device *dev)
 		port->resuming_from_deep_sleep = false;
 	}
 
+	if (port->gsi_mode && !port->is_gsi_resume) {
+		ret = msm_geni_uart_gsi_suspend_resume(port, false);
+		if (ret < 0) {
+			dev_err(dev, "%s: Error ret %d\n", __func__, ret);
+			goto exit_runtime_resume;
+		}
+		port->is_gsi_resume = true;
+		IPC_LOG_MSG(port->ipc_log_pwr, "%s: GSI resumed \n", __func__);
+	}
 	IPC_LOG_MSG(port->ipc_log_pwr, "%s:\n", __func__);
 exit_runtime_resume:
 	return ret;
@@ -4700,6 +4766,7 @@ static int msm_geni_serial_sys_hib_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct msm_geni_serial_port *port = platform_get_drvdata(pdev);
 	struct uart_port *uport = &port->uport;
+	bool force_resume = false;
 
 	if (uart_console(uport) || port->pm_auto_suspend_disable) {
 		uart_suspend_port((struct uart_driver *)uport->private_data,
@@ -4720,8 +4787,37 @@ static int msm_geni_serial_sys_hib_suspend(struct device *dev)
 			mutex_unlock(&tty_port->mutex);
 			return -EBUSY;
 		}
+
+		if (port->gsi_mode) {
+			/*
+			 * Checking for runtime suspend. If suspended, turning
+			 * on the clocks and resuming the GSI. Later suspending
+			 * GSI with deep sleep flag for resetting & deallocating
+			 * channels in GSI and later turning off the clocks.
+			 */
+			if (pm_runtime_status_suspended(dev)) {
+				se_geni_clks_on(&port->serial_rsc);
+				msm_geni_uart_gsi_suspend_resume(port, false);
+				force_resume = true;
+				IPC_LOG_MSG(port->ipc_log_pwr, "%s: GSI channels force resumed\n",
+					     __func__);
+			}
+			port->is_deep_sleep = true;
+
+			if (msm_geni_uart_gsi_suspend_resume(port, true)) {
+				if (force_resume)
+					se_geni_clks_off(&port->serial_rsc);
+				dev_err(dev, "%s: Error: GSI channels suspend\n",
+					__func__);
+				mutex_unlock(&tty_port->mutex);
+				return -EBUSY;
+			}
+			if (force_resume)
+				se_geni_clks_off(&port->serial_rsc);
+			port->is_gsi_resume = false;
+		}
 		geni_se_ssc_clk_enable(&port->serial_rsc, false);
-		IPC_LOG_MSG(port->ipc_log_pwr, "%s\n", __func__);
+		IPC_LOG_MSG(port->ipc_log_pwr, "%s: Done\n", __func__);
 		mutex_unlock(&tty_port->mutex);
 	}
 	return 0;
@@ -4751,6 +4847,11 @@ static int msm_geni_serial_sys_hib_resume(struct device *dev)
 		 */
 		port->port_setup = false;
 		geni_se_ssc_clk_enable(&port->serial_rsc, true);
+		if (port->gsi_mode && !port->is_gsi_resume) {
+			port->is_deep_sleep = true;
+			IPC_LOG_MSG(port->ipc_log_pwr,
+				     "%s: Resume GSI channels \n", __func__);
+		}
 	}
 	return 0;
 }
@@ -4810,6 +4911,12 @@ static int msm_geni_serial_sys_hib_resume(struct device *dev)
 }
 
 static int msm_geni_serial_sys_hib_suspend(struct device *dev)
+{
+	return 0;
+}
+
+static int msm_geni_uart_gsi_suspend_resume(struct msm_geni_serial_port *msm_port,
+					    bool suspend)
 {
 	return 0;
 }
