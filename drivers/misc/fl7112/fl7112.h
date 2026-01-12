@@ -27,7 +27,6 @@
 #define FL7112_MTP_CHECK_STATUS_RETRY_MAX               20
 #define FL7112_MTP_POWER_CURRENT_TABLE_SIZE             8
 #define FL7112_MTP_RECOVERY                             1
-#define FL7112_MTP_AUTO_UPGRADE                         0
 #define BIT_SET( data, bit ) ( data |= ( 1 << bit ) )
 #define IS_BIT_SET(  data, bit ) ( data & ( 1 << bit ) )
 #define EXIT_FALSE( status )  \
@@ -77,10 +76,35 @@ typedef union
 }CharToFloat;
 
 enum fw_upgrade_status {
-  	UPDATE_SUCCESS = 0,
-  	UPDATE_RUNNING = 1,
-  	UPDATE_FAILED = 2,
-  	UPDATE_UNKNOWN = 3,
-  	UPDATE_SUBFAILED = 4,
+    UPDATE_SUCCESS = 0,
+    UPDATE_RUNNING = 1,
+    UPDATE_FAILED = 2,
+    UPDATE_UNKNOWN = 3,
+    UPDATE_SUBFAILED = 4,
 };
+
+struct fl7112 {
+    struct device *dev;
+    u8 i2c_addr;
+    u8 i2c_wbuf[FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK];
+    u8 i2c_rbuf[FL7112_MTP_MAX_SIZE_OF_FIRMWARE_BLOCK];
+    struct i2c_client *i2c_client;
+    enum fw_upgrade_status fw_status;
+    uint32_t version;
+    struct workqueue_struct *wq;  /* upgrade queue */
+    struct work_struct wk;        /* upgrade work */
+    u32 reset_pin;   /*reset pin */
+    u32 pwr_1v2;
+    u32 pwr_3v3;
+};
+
+static int fl7112_read(struct fl7112 *pdata, int reg, char *buf, u32 size);
+static bool fl7112_mtpread_firmware(struct fl7112 *pdata,int address,BYTE* DataBuffer,int DataBufferLength);
+static bool fl7112_mtpwrite_firmware(struct fl7112 *pdata,int Address,const u8* DataBuffer,int DataBufferLength,bool* IsError,bool* IsBusy);
+static void fl7112_mtppowermodedisable(struct fl7112 *pdata);
+static bool fl7112_mtpwriteunlock(struct fl7112 *pdata);
+static void fl7112_mtpwritelock(struct fl7112 *pdata);
+static bool fl7112_mtpcheckstatus(struct fl7112 *pdata,bool* IsError,bool* IsBusy);
+static void fl7112_reset(struct fl7112 *pdata);
+
 #endif /* __FL7112_H_ */
