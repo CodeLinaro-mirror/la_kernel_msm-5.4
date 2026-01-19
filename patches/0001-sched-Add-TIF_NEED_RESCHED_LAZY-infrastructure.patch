@@ -142,7 +142,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -943,10 +943,9 @@ static inline void hrtick_rq_init(struct
+@@ -944,10 +944,9 @@ static inline void hrtick_rq_init(struct
   * this avoids any races wrt polling state changes and thereby avoids
   * spurious IPIs.
   */
@@ -155,7 +155,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  }
  
  /*
-@@ -971,9 +970,9 @@ static bool set_nr_if_polling(struct tas
+@@ -972,9 +971,9 @@ static bool set_nr_if_polling(struct tas
  }
  
  #else
@@ -167,7 +167,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	return true;
  }
  
-@@ -1079,28 +1078,37 @@ void wake_up_q(struct wake_q_head *head)
+@@ -1080,28 +1079,37 @@ void wake_up_q(struct wake_q_head *head)
   * might also involve a cross-CPU call to trigger the scheduler on
   * the target CPU.
   */
@@ -212,7 +212,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  }
  
  void resched_cpu(int cpu)
-@@ -1195,7 +1203,7 @@ static void wake_up_idle_cpu(int cpu)
+@@ -1196,7 +1204,7 @@ static void wake_up_idle_cpu(int cpu)
  	 * and testing of the above solutions didn't appear to report
  	 * much benefits.
  	 */
