@@ -5416,6 +5416,7 @@ static int nl80211_send_station(struct sk_buff *msg, u32 cmd, u32 portid,
 		PUT_SINFO(ACK_SIGNAL, ack_signal, u8);
 		PUT_SINFO(ACK_SIGNAL_AVG, avg_ack_signal, s8);
 	}
+	PUT_SINFO(PENDING_MPDU_MSDUS, pending_mpdu_msdus, u32);
 
 #undef PUT_SINFO
 #undef PUT_SINFO_U64

@@ -1629,6 +1629,7 @@ struct station_info {
 
 	u32 rx_mpdu_count;
 	u32 fcs_err_count;
+	u32 pending_mpdu_msdus;
 
 	u32 airtime_link_metric;
 };
