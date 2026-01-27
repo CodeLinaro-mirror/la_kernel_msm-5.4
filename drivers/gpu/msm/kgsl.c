@@ -32,6 +32,9 @@
 #include "kgsl_sync.h"
 #include "kgsl_sysfs.h"
 #include "kgsl_trace.h"
+/* Instantiate tracepoints */
+#define CREATE_TRACE_POINTS
+#include "kgsl_power_trace.h"
 
 #ifndef arch_mmap_check
 #define arch_mmap_check(addr, len, flags)	(0)
