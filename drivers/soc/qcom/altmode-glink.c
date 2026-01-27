@@ -765,7 +765,7 @@ static int altmode_probe(struct platform_device *pdev)
 	/*
 	 * add bool flag for AIO, Used to restart pmic CC communication
 	 */
-	if (of_property_read_bool(dev->of_node, "qcom,ktm5000-customize-enable")) {
+	if (of_property_read_bool(dev->of_node, "dp2hdmi-altmode-adsp-payload-fixup")) {
 		ktm5000_customize_enable = true;
 	}
 
