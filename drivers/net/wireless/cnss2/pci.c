@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/cma.h>
@@ -2161,9 +2161,11 @@ static void cnss_pci_set_wlaon_pwr_ctrl(struct cnss_pci_data *pci_priv,
 		    WLAON_QFPROM_PWR_CTRL_REG, val);
 
 	if (set_vddd4blow)
-		val |= QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_MASK;
+		val |= (QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_MASK |
+			QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_WL_MASK);
 	else
-		val &= ~QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_MASK;
+		val &= ~(QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_MASK |
+			 QFPROM_PWR_CTRL_VDD4BLOW_SW_EN_WL_MASK);
 
 	if (set_shutdown)
 		val |= QFPROM_PWR_CTRL_SHUTDOWN_EN_MASK;

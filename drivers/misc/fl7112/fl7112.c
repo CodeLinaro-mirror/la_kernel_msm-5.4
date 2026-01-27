@@ -1456,10 +1456,10 @@ static int fl7112_remove(struct i2c_client *client)
 }
 
 static const struct of_device_id fl7112_of_match[] = {
-	{ .compatible = "Parade,fl7112-fs8822" },
+	{ .compatible = "blink2,fl7112-fs8822" },
 	{ }
 };
-MODULE_DEVICE_TABLE(of, geni_i2c_dt_match);
+MODULE_DEVICE_TABLE(of, fl7112_of_match);
 
 static struct i2c_driver fl7112_driver = {
 	.probe = fl7112_probe,

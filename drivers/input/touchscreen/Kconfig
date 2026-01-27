@@ -1528,6 +1528,15 @@ config TOUCHSCREEN_IQS5XX
 	  To compile this driver as a module, choose M here: the
 	  module will be called iqs5xx.
 
+
+config TOUCHSCREEN_CAP1296
+	tristate "touch driver for cap1296"
+	help
+	  The CAP1296 is a multiple channel capacitive touch
+	  sensor controller. It contains six (6) individual capaci-
+	  tive touch sensor inputs with programmable sensitivity
+	  for use in touch sensor applications.
+
 source "drivers/input/touchscreen/st/Kconfig"
 
 source "drivers/input/touchscreen/focaltech_touch/Kconfig"
