@@ -46,6 +46,8 @@ void __iomem *tlmm_rgmii_pull_ctl1_base;
 void __iomem *tlmm_rgmii_rx_ctr_base;
 int open_not_called;
 
+#define ETHQOS_HM_SYSFS_DEV_ATTR_PERMS 0644
+
 #define PHY_LOOPBACK_1000 0x4140
 #define PHY_LOOPBACK_100 0x6100
 #define PHY_LOOPBACK_10 0x4100
@@ -54,6 +56,9 @@ int open_not_called;
 
 static void ethqos_rgmii_io_macro_loopback(struct qcom_ethqos *ethqos,
 					   int mode);
+static int ethqos_create_healthmonitor_sysfs(struct qcom_ethqos *ethqos);
+static int ethqos_initialize_healthmonitor(struct qcom_ethqos *ethqos);
+static int ethqos_cleanup_healthmonitor(struct qcom_ethqos *ethqos);
 static int phy_digital_loopback_config(struct qcom_ethqos *ethqos, int speed, int config);
 static void __iomem *tlmm_central_base_addr;
 static struct emac_emb_smmu_cb_ctx emac_emb_smmu_ctx = {0};
@@ -4451,6 +4456,325 @@ static void ethqos_get_cv2x_dt(struct qcom_ethqos *ethqos,
 	}
 }
 
+static ssize_t ethqos_show_health_status(struct device *dev,
+			struct device_attribute *attr, char *user_buf)
+{
+	return 0;
+}
+
+static DEVICE_ATTR(status, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_status, NULL);
+
+static ssize_t ethqos_show_health_stats(struct device *dev,
+			struct device_attribute *attr, char *user_buf)
+{
+	return 0;
+}
+
+static DEVICE_ATTR(stats, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_stats, NULL);
+
+static ssize_t ethqos_show_health_recovery(struct device *dev,
+			struct device_attribute *attr, char *user_buf)
+{
+	return 0;
+}
+
+static ssize_t ethqos_store_health_recovery(struct device *dev,
+			struct device_attribute *attr, const char *user_buf, size_t size)
+{
+	return 0;
+}
+
+static DEVICE_ATTR(recovery, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_recovery,
+			ethqos_store_health_recovery);
+
+static ssize_t ethqos_show_health_trigger_stall(struct device *dev,
+			struct device_attribute *attr, char *user_buf)
+{
+	return 0;
+}
+
+static ssize_t ethqos_store_health_trigger_stall(struct device *dev, struct device_attribute *attr,
+				const char *user_buf, size_t size)
+{
+	return 0;
+}
+
+static DEVICE_ATTR(trigger_stall, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_trigger_stall,
+		ethqos_store_health_trigger_stall);
+
+static int ethqos_create_healthmonitor_sysfs(struct qcom_ethqos *ethqos)
+{
+	struct stmmac_priv *priv;
+	struct net_device *netdev;
+	int ret;
+
+	if (!ethqos) {
+		ETHQOSERR("Null Param %s\n", __func__);
+		return -EINVAL;
+	}
+	netdev = platform_get_drvdata(ethqos->pdev);
+	if (!netdev) {
+		ETHQOSERR("%s: netdev is NULL\n", __func__);
+		return -EINVAL;
+	}
+	priv = qcom_ethqos_get_priv(ethqos);
+	if (!priv) {
+		ETHQOSERR("%s: priv is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	ethqos->hm_sysfs_kobj = kobject_create_and_add("health_monitor", &netdev->dev.kobj);
+	if (!ethqos->hm_sysfs_kobj) {
+		ETHQOSERR("Unable to create health_monitor kobject\n");
+		goto fail;
+	}
+
+	ret = sysfs_create_file(ethqos->hm_sysfs_kobj,
+				&dev_attr_status.attr);
+	if (ret) {
+		ETHQOSERR("unable to create status hm_sysfs node\n");
+		goto fail;
+	}
+
+	ret = sysfs_create_file(ethqos->hm_sysfs_kobj,
+				&dev_attr_stats.attr);
+	if (ret) {
+		ETHQOSERR("unable to create stats hm_sysfs node\n");
+		goto fail;
+	}
+
+	ret = sysfs_create_file(ethqos->hm_sysfs_kobj,
+			&dev_attr_recovery.attr);
+	if (ret) {
+		ETHQOSERR("unable to create recovery hm_sysfs node\n");
+		goto fail;
+	}
+
+	ret = sysfs_create_file(ethqos->hm_sysfs_kobj,
+				&dev_attr_trigger_stall.attr);
+	if (ret) {
+		ETHQOSERR("unable to create trigger_stall hm_sysfs node\n");
+		goto fail;
+	}
+	return 0;
+
+fail:
+		kobject_put(ethqos->hm_sysfs_kobj);
+		ethqos->hm_sysfs_kobj = NULL;
+		return -ENOMEM;
+}
+
+static int ethqos_alloc_hm_stats(struct health_monitor *hm_stats)
+{
+	int i, ret = 0;
+
+	hm_stats->cm_hw_stats = kzalloc(sizeof(struct common_hw_stats), GFP_KERNEL);
+	if (!hm_stats->cm_hw_stats)
+		return -ENOMEM;
+
+	hm_stats->cm_hw_stats->mmc_cnts = kzalloc(sizeof(struct mmc_counters), GFP_KERNEL);
+	if (!hm_stats->cm_hw_stats->mmc_cnts) {
+		ret = -ENOMEM;
+		goto free_cm_hw_stats;
+	}
+
+	for (i = 0; i <= DMA_CH1; i++) {
+		hm_stats->tx_dma_stats[i] = kzalloc(sizeof(struct dma_stats), GFP_KERNEL);
+		if (!hm_stats->tx_dma_stats[i]) {
+			ret = -ENOMEM;
+			goto free_tx_dma_stats;
+		}
+	}
+
+	for (i = 0; i <= DMA_CH2; i++) {
+		hm_stats->rx_dma_stats[i] = kzalloc(sizeof(struct dma_stats), GFP_KERNEL);
+		if (!hm_stats->rx_dma_stats[i]) {
+			ret = -ENOMEM;
+			goto free_rx_dma_stats;
+		}
+	}
+
+	hm_stats->sw_path_dvr_stats = kzalloc(sizeof(struct sw_path_driver_stats), GFP_KERNEL);
+	if (!hm_stats->sw_path_dvr_stats) {
+		ret = -ENOMEM;
+		goto free_rx_dma_stats;
+	}
+
+	return 0;
+
+free_rx_dma_stats:
+	for (i = 0; i <= DMA_CH2; i++) {
+		if (hm_stats->rx_dma_stats[i]) {
+			kfree(hm_stats->rx_dma_stats[i]);
+			hm_stats->rx_dma_stats[i] = NULL;
+		}
+	}
+
+free_tx_dma_stats:
+	for (i = 0; i <= DMA_CH1; i++) {
+		if (hm_stats->tx_dma_stats[i]) {
+			kfree(hm_stats->tx_dma_stats[i]);
+			hm_stats->tx_dma_stats[i] = NULL;
+		}
+	}
+
+	if (hm_stats->cm_hw_stats->mmc_cnts) {
+		kfree(hm_stats->cm_hw_stats->mmc_cnts);
+		hm_stats->cm_hw_stats->mmc_cnts = NULL;
+	}
+
+free_cm_hw_stats:
+	kfree(hm_stats->cm_hw_stats);
+	hm_stats->cm_hw_stats = NULL;
+
+	return ret;
+}
+
+static void ethqos_free_hm_stats(struct health_monitor *hm_stats)
+{
+	int i;
+
+	if (!hm_stats)
+		return;
+
+	if (hm_stats->cm_hw_stats) {
+		if (hm_stats->cm_hw_stats->mmc_cnts) {
+			kfree(hm_stats->cm_hw_stats->mmc_cnts);
+			hm_stats->cm_hw_stats->mmc_cnts = NULL;
+		}
+		kfree(hm_stats->cm_hw_stats);
+		hm_stats->cm_hw_stats = NULL;
+	}
+
+	for (i = 0; i <= DMA_CH1; i++) {
+		if (hm_stats->tx_dma_stats[i]) {
+			kfree(hm_stats->tx_dma_stats[i]);
+			hm_stats->tx_dma_stats[i] = NULL;
+		}
+	}
+
+	for (i = 0; i <= DMA_CH2; i++) {
+		if (hm_stats->rx_dma_stats[i]) {
+			kfree(hm_stats->rx_dma_stats[i]);
+			hm_stats->rx_dma_stats[i] = NULL;
+		}
+	}
+
+	if (hm_stats->sw_path_dvr_stats) {
+		kfree(hm_stats->sw_path_dvr_stats);
+		hm_stats->sw_path_dvr_stats = NULL;
+	}
+}
+
+static int ethqos_initialize_healthmonitor(struct qcom_ethqos *ethqos)
+{
+	int ret = 0;
+
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	ethqos->old_hm_stats = kzalloc(sizeof(struct health_monitor), GFP_KERNEL);
+	if (!ethqos->old_hm_stats)
+		return -ENOMEM;
+
+	ethqos->new_hm_stats = kzalloc(sizeof(struct health_monitor), GFP_KERNEL);
+	if (!ethqos->new_hm_stats) {
+		ret = -ENOMEM;
+		goto free_old_hm_stats;
+	}
+
+	ret = ethqos_alloc_hm_stats(ethqos->new_hm_stats);
+	if (ret) {
+		ETHQOSERR("Failed to allocate new health monitor stats\n");
+		goto free_new_hm_stats;
+	}
+
+	ret = ethqos_alloc_hm_stats(ethqos->old_hm_stats);
+	if (ret) {
+		ETHQOSERR("Failed to allocate old health monitor stats\n");
+		goto free_new_hm_stats_data;
+	}
+
+	ethqos->hm_counters = kzalloc(sizeof(struct health_monitor_counters), GFP_KERNEL);
+	if (!ethqos->hm_counters) {
+		ret = -ENOMEM;
+		goto free_old_hm_stats_data;
+	}
+
+	ethqos->trigger_mac_error_flag = false;
+	ethqos->last_triggered_error = -1;
+	ethqos->sw_rx_unfiltered_ch_status = NO_STALL;
+	ethqos->sw_rx_filtered_ch_status = NO_STALL;
+
+	ret = ethqos_create_healthmonitor_sysfs(ethqos);
+	if (ret) {
+		ETHQOSERR("Failed to create health monitor sysfs: %d\n", ret);
+		goto free_hm_counters;
+	}
+
+	return 0;
+
+free_hm_counters:
+	if (ethqos->hm_counters) {
+		kfree(ethqos->hm_counters);
+		ethqos->hm_counters = NULL;
+	}
+
+free_old_hm_stats_data:
+	ethqos_free_hm_stats(ethqos->old_hm_stats);
+
+free_new_hm_stats_data:
+	ethqos_free_hm_stats(ethqos->new_hm_stats);
+
+free_new_hm_stats:
+	if (ethqos->new_hm_stats) {
+		kfree(ethqos->new_hm_stats);
+		ethqos->new_hm_stats = NULL;
+	}
+
+free_old_hm_stats:
+	if (ethqos->old_hm_stats) {
+		kfree(ethqos->old_hm_stats);
+		ethqos->old_hm_stats = NULL;
+	}
+
+	return ret;
+}
+
+static int ethqos_cleanup_healthmonitor(struct qcom_ethqos *ethqos)
+{
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	if (ethqos->hm_sysfs_kobj) {
+		kobject_put(ethqos->hm_sysfs_kobj);
+		ethqos->hm_sysfs_kobj = NULL;
+	}
+
+	if (ethqos->hm_counters) {
+		kfree(ethqos->hm_counters);
+		ethqos->hm_counters = NULL;
+	}
+
+	if (ethqos->old_hm_stats) {
+		ethqos_free_hm_stats(ethqos->old_hm_stats);
+		kfree(ethqos->old_hm_stats);
+		ethqos->old_hm_stats = NULL;
+	}
+
+	if (ethqos->new_hm_stats) {
+		ethqos_free_hm_stats(ethqos->new_hm_stats);
+		kfree(ethqos->new_hm_stats);
+		ethqos->new_hm_stats = NULL;
+	}
+
+	return 0;
+}
+
 static int _qcom_ethqos_probe(void *arg)
 {
 	struct platform_device *pdev = (struct platform_device *)arg;
@@ -4844,6 +5168,8 @@ ethqos_emac_mem_base(ethqos);
 	place_marker("M - Ethernet probe end");
 #endif
 
+	ethqos_initialize_healthmonitor(ethqos);
+
 #ifdef CONFIG_NET_L3_MASTER_DEV
 	if (ethqos->early_eth_enabled &&
 	    ethqos->io_macro.l3_master_dev) {
@@ -4921,6 +5247,7 @@ static int qcom_ethqos_remove(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, NULL);
 	of_platform_depopulate(&pdev->dev);
+	ethqos_cleanup_healthmonitor(ethqos);
 
 	return ret;
 }

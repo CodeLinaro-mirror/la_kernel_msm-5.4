@@ -225,6 +225,11 @@ do  {\
 #define MAC_CONFIGURATION 0x0
 #define MAC_LM BIT(12)
 
+
+#define DMA_CH0 0
+#define DMA_CH1 1
+#define DMA_CH2 2
+
 #define EMAC_QUEUE_0 0
 #define EMAC_CHANNEL_0 0
 #define EMAC_CHANNEL_1 1
@@ -964,6 +969,59 @@ static struct emac_icc_data emac_apb_icc_data[] = {
 	},
 };
 
+enum stall_status {
+	NO_DATA_AT_ETH,
+	MAC_HW_STALLED,
+	NO_STALL,
+	TX_HW_PATH_STALLED,
+	TX_SW_PATH_STALLED,
+	RX_HW_PATH_STALLED,
+	RX_SW_PATH_STALLED,
+	UNKNOWN
+};
+
+struct mmc_counters {
+	u32 mmc_tx_octetcount_gb;
+	u32 mmc_rx_octetcount_gb;
+};
+
+struct common_hw_stats {
+	struct mmc_counters *mmc_cnts;
+	u32	mmc_rx_fifo_overflow;
+	u32	iomacro_error;
+};
+
+struct dma_stats {
+	dma_addr_t head_pointer;
+	dma_addr_t current_pointer;
+	dma_addr_t tail_pointer;
+	u32 ring_length;
+	u32 channel_number;
+};
+
+struct sw_path_driver_stats {
+	u32 tx_pkt_n;
+	u32 rx_pkt_n;
+	u32 tx_pkt_nw_stack;
+};
+
+struct health_monitor {
+	struct common_hw_stats *cm_hw_stats;
+	struct dma_stats *tx_dma_stats[2];
+	struct dma_stats *rx_dma_stats[3];
+	u32	dma_debug_status0;
+	struct sw_path_driver_stats *sw_path_dvr_stats;
+};
+
+struct health_monitor_counters {
+	unsigned long mac_hw_stall_count;
+	unsigned long hw_path_stall_count;
+	unsigned long sw_tx_path_stall_count;
+	unsigned long sw_rx_path_stall_count;
+	unsigned long mac_hw_recovery_count;
+	unsigned long sw_tx_path_recovery_count;
+	unsigned long sw_rx_path_recovery_count;
+};
 
 struct qcom_ethqos {
 	struct platform_device *pdev;
@@ -1097,6 +1155,15 @@ struct qcom_ethqos {
 	struct icc_path *apb_icc_path;
 	struct emac_icc_data *emac_apb_icc;
 
+	/* Health Monitor Variables */
+	struct health_monitor *old_hm_stats;
+	struct health_monitor *new_hm_stats;
+	int last_triggered_error;
+	bool trigger_mac_error_flag;
+	enum stall_status sw_rx_unfiltered_ch_status;
+	enum stall_status sw_rx_filtered_ch_status;
+	struct health_monitor_counters *hm_counters;
+	struct kobject* hm_sysfs_kobj;
 };
 
 struct pps_cfg {
