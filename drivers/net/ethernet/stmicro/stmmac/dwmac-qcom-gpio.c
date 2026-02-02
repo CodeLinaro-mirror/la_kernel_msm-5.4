@@ -208,6 +208,9 @@ void ethqos_reset_phy_enable_interrupt(struct qcom_ethqos *ethqos)
 		priv->phydev->interrupts = PHY_INTERRUPT_ENABLED;
 	}
 
+	if (!netif_running(priv->dev))
+		return;
+
 	phylink_connect_phy(priv->phylink, priv->phydev);
 
 	if (priv->plat->phy_intr_en_extn_stm && priv->plat->phy_intr_en) {
