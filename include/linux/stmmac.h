@@ -185,6 +185,7 @@ struct plat_stmmacenet_data {
 	unsigned int clk_ptp_rate;
 	unsigned int clk_ptp_req_rate;
 	unsigned int clk_ref_rate;
+	unsigned int ptp_clk_ref_cnt;
 	s32 ptp_max_adj;
 	struct reset_control *stmmac_rst;
 	struct stmmac_axi *axi;

@@ -1894,8 +1894,10 @@ static void qcom_ethqos_phy_suspend_clks(struct qcom_ethqos *ethqos)
 		if (priv->plat->pclk)
 			clk_disable_unprepare(priv->plat->pclk);
 
-		if (priv->plat->clk_ptp_ref)
+		if (priv->plat->clk_ptp_ref && priv->plat->ptp_clk_ref_cnt) {
 			clk_disable_unprepare(priv->plat->clk_ptp_ref);
+			priv->plat->ptp_clk_ref_cnt--;
+		}
 		priv->plat->clks_suspended = true;
 	}
 	if (ethqos->rgmii_clk)
@@ -2146,24 +2148,39 @@ inline bool qcom_ethqos_is_phy_link_up(struct qcom_ethqos *ethqos)
 static void qcom_ethqos_phy_resume_clks(struct qcom_ethqos *ethqos)
 {
 	struct stmmac_priv *priv = qcom_ethqos_get_priv(ethqos);
+	int ret = 0;
 
 	ETHQOSINFO("Enter\n");
 
-	if (ethqos->phy_wol_supported || ethqos->current_phy_mode == DISABLE_PHY_SUSPEND_ENABLE_RESUME) {
-		if (priv->plat->stmmac_clk)
-			clk_prepare_enable(priv->plat->stmmac_clk);
+	if (priv->plat->clks_suspended) {
+		if (priv->plat->stmmac_clk) {
+			ret = clk_prepare_enable(priv->plat->stmmac_clk);
+			if (ret < 0)
+				netdev_warn(priv->dev, "failed to enable stmmac clock: %d\n", ret);
+		}
 
-		if (priv->plat->pclk)
-			clk_prepare_enable(priv->plat->pclk);
+		if (priv->plat->pclk) {
+			ret = clk_prepare_enable(priv->plat->pclk);
+			if (ret < 0)
+				netdev_warn(priv->dev, "failed to enable pclk: %d\n", ret);
+		}
 
-		if (priv->plat->clk_ptp_ref)
-			clk_prepare_enable(priv->plat->clk_ptp_ref);
+		if (priv->plat->clk_ptp_ref) {
+			ret = clk_prepare_enable(priv->plat->clk_ptp_ref);
+			if (ret < 0)
+				netdev_warn(priv->dev, "failed to enable PTP reference clock: %d\n", ret);
+			else
+				priv->plat->ptp_clk_ref_cnt++;
+		}
 
 		priv->plat->clks_suspended = false;
 	}
 
-	if (ethqos->rgmii_clk)
+	if (ethqos->rgmii_clk) {
 		clk_prepare_enable(ethqos->rgmii_clk);
+		if (ret < 0)
+			netdev_warn(priv->dev, "failed to enable rgmii clock: %d\n", ret);
+	}
 
 	if (qcom_ethqos_is_phy_link_up(ethqos))
 		ethqos_update_rgmii_clk_and_bus_cfg(ethqos, ethqos->speed);
@@ -4638,6 +4655,7 @@ static int _qcom_ethqos_probe(void *arg)
 	plat_dat->HandleRICompletion = EthWrapper_HandleRICompletion;
 #endif
 	plat_dat->clks_suspended = false;
+	plat_dat->ptp_clk_ref_cnt = 0;
 
         if (of_property_read_bool(pdev->dev.of_node,
                                   "disable-intr-mod") &&
@@ -5205,8 +5223,11 @@ static int qcom_ethqos_hib_restore(struct device *dev)
 #ifdef DWC_ETH_QOS_CONFIG_PTP
 	if (priv->plat->clk_ptp_ref) {
 		ret = clk_prepare_enable(priv->plat->clk_ptp_ref);
-		if (ret < 0)
+		if (ret < 0) {
 			netdev_warn(priv->dev, "failed to enable PTP reference clock: %d\n", ret);
+		} else {
+			priv->plat->ptp_clk_ref_cnt++;
+		}
 	}
 	ret = stmmac_init_ptp(priv);
 	if (ret == -EOPNOTSUPP) {

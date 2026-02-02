@@ -831,8 +831,10 @@ static int stmmac_init_ptp(struct stmmac_priv *priv)
 
 static void stmmac_release_ptp(struct stmmac_priv *priv)
 {
-	if (priv->plat->clk_ptp_ref)
+	if (priv->plat->clk_ptp_ref && priv->plat->ptp_clk_ref_cnt) {
 		clk_disable_unprepare(priv->plat->clk_ptp_ref);
+		priv->plat->ptp_clk_ref_cnt--;
+	}
 	stmmac_ptp_unregister(priv);
 }
 
@@ -2956,6 +2958,8 @@ static int stmmac_hw_setup(struct net_device *dev, bool init_ptp)
 		ret = clk_prepare_enable(priv->plat->clk_ptp_ref);
 		if (ret < 0)
 			netdev_warn(priv->dev, "failed to enable PTP reference clock: %d\n", ret);
+		else
+			priv->plat->ptp_clk_ref_cnt++;
 
 		ret = stmmac_init_ptp(priv);
 		if (ret == -EOPNOTSUPP)
@@ -3011,8 +3015,10 @@ static void stmmac_hw_teardown(struct net_device *dev)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
 
-	if (priv->plat->clk_ptp_ref)
+	if (priv->plat->clk_ptp_ref && priv->plat->ptp_clk_ref_cnt) {
 		clk_disable_unprepare(priv->plat->clk_ptp_ref);
+		priv->plat->ptp_clk_ref_cnt--;
+	}
 }
 
 void stmmac_mac2mac_adjust_link(int speed, struct stmmac_priv *priv)
@@ -5665,8 +5671,10 @@ int stmmac_suspend(struct device *dev)
 
 		if (!priv->plat->clks_suspended) {
 			/* Disable clock in case of PWM is off */
-			if (priv->plat->clk_ptp_ref)
+			if (priv->plat->clk_ptp_ref && priv->plat->ptp_clk_ref_cnt) {
 				clk_disable_unprepare(priv->plat->clk_ptp_ref);
+				priv->plat->ptp_clk_ref_cnt--;
+			}
 			clk_disable_unprepare(priv->plat->pclk);
 			clk_disable_unprepare(priv->plat->stmmac_clk);
 			priv->plat->clks_suspended = true;
@@ -5717,6 +5725,7 @@ int stmmac_resume(struct device *dev)
 {
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct stmmac_priv *priv = netdev_priv(ndev);
+	int ret = 0;
 
 	if (!netif_running(ndev))
 		return 0;
@@ -5737,10 +5746,21 @@ int stmmac_resume(struct device *dev)
 
 		if (priv->plat->clks_suspended) {
 			/* enable the clk previously disabled */
-			clk_prepare_enable(priv->plat->stmmac_clk);
-			clk_prepare_enable(priv->plat->pclk);
-			if (priv->plat->clk_ptp_ref)
-				clk_prepare_enable(priv->plat->clk_ptp_ref);
+			ret = clk_prepare_enable(priv->plat->stmmac_clk);
+			if (ret < 0)
+				netdev_warn(priv->dev, "failed to enable stmmac clock: %d\n", ret);
+
+			ret = clk_prepare_enable(priv->plat->pclk);
+			if (ret < 0)
+				netdev_warn(priv->dev, "failed to enable pclk: %d\n", ret);
+
+			if (priv->plat->clk_ptp_ref) {
+				ret = clk_prepare_enable(priv->plat->clk_ptp_ref);
+				if (ret < 0)
+					netdev_warn(priv->dev, "failed to enable PTP reference clock: %d\n", ret);
+				else
+					priv->plat->ptp_clk_ref_cnt++;
+			}
 			priv->plat->clks_suspended = false;
 		}
 		/* reset the phy so that it's ready */
