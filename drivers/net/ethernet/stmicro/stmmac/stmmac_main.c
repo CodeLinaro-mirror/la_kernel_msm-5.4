@@ -2284,7 +2284,8 @@ if (priv->dev->stats.tx_packets == 1)
 #endif
 	if (unlikely(netif_tx_queue_stopped(netdev_get_tx_queue(priv->dev,
 								queue))) &&
-	    stmmac_tx_avail(priv, queue) > STMMAC_TX_THRESH) {
+	    stmmac_tx_avail(priv, queue) > STMMAC_TX_THRESH &&
+	    !priv->plat->clks_suspended) {
 
 		netif_dbg(priv, tx_done, priv->dev,
 			  "%s: restart transmit\n", __func__);
@@ -3630,6 +3631,9 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 	unsigned short eth_type = 0;
 	int tx_packets = 0;
 	bool set_ic = false;
+
+	if (priv->plat->clks_suspended)
+		return NETDEV_TX_BUSY;
 
 	tx_q = &priv->tx_queue[queue];
 
