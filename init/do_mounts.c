@@ -31,6 +31,11 @@
 
 #include "do_mounts.h"
 
+/* wait 15s to keep waiting scene in wathdog crash dump */
+#define TIMEOUT_FOR_EXT4_MS 15000
+/*interval sleep for ext4 ms */
+#define INTERVAL_FOR_EXT4_MS 50
+
 int __initdata rd_doload;	/* 1 = load RAM disk, 0 = don't load */
 
 int root_mountflags = MS_RDONLY | MS_SILENT;
@@ -577,6 +582,23 @@ void __init mount_root(void)
 #endif
 }
 
+static bool ext4_is_registered(void)
+{
+    struct file_system_type *t = get_fs_type("ext4");
+    return t && !IS_ERR(t);
+}
+
+static void wait_for_ext4_register(unsigned long timeout_ms)
+{
+    unsigned long waited = 0;
+    while (!ext4_is_registered()) {
+        if (timeout_ms && waited >= timeout_ms)
+            break;
+        msleep(INTERVAL_FOR_EXT4_MS);
+        waited += INTERVAL_FOR_EXT4_MS;
+    }
+}
+
 /*
  * Prepare the namespace - decide what/where to mount, load ramdisks, etc.
  */
@@ -638,6 +660,8 @@ void __init prepare_namespace(void)
 		if (is_floppy && rd_doload && rd_load_disk(0))
 			ROOT_DEV = Root_RAM0;
 
+		/* wait 15s to keep waiting scene in wathdog crash dump */
+                wait_for_ext4_register(TIMEOUT_FOR_EXT4_MS);
 		mount_root();
 	}
 out:
