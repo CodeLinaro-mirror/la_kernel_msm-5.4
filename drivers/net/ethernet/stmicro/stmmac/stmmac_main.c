@@ -1145,50 +1145,44 @@ static int stmmac_init_phy(struct net_device *dev)
 			netdev_err(priv->dev, "no phy at addr %d\n", addr);
 			return -ENODEV;
 		}
-
-		if (!priv->plat->mac2mac_en) {
-			if (((priv->phydev->phy_id &
-			    priv->phydev->drv->phy_id_mask) == MICREL_PHY_ID) &&
-				!priv->plat->phy_intr_en) {
-				ret = priv->plat->phy_intr_enable(priv);
-				if (ret)
-					pr_alert("qcom-ethqos: Unable to enable PHY interrupt\n");
-				else
-					priv->plat->phy_intr_en = true;
-			}
-		}
-
-		if (priv->plat->phy_intr_en_extn_stm && priv->plat->phy_intr_en) {
-			priv->phydev->irq = PHY_IGNORE_INTERRUPT;
-			priv->phydev->interrupts =  PHY_INTERRUPT_ENABLED;
-		}
-
 		ret = phylink_connect_phy(priv->phylink, priv->phydev);
+	}
 
 #ifndef DEFER_ENABLE_INTERRUPTS
-		if (priv->plat->phy_intr_en_extn_stm && priv->plat->phy_intr_en) {
-			if (priv->phydev->drv->ack_interrupt &&
-			    !priv->phydev->drv->ack_interrupt(priv->phydev)) {
-				pr_info(" qcom-ethqos: %s ack_interrupt successful aftre connect\n",
-					__func__);
-			} else {
-				pr_err(" qcom-ethqos: %s ack_interrupt failed aftre connect\n",
-				       __func__);
-			}
-
-			if (priv->phydev->drv &&
-			    priv->phydev->drv->config_intr &&
-			    !priv->phydev->drv->config_intr(priv->phydev)) {
-				pr_err(" qcom-ethqos: %s config_phy_intr successful aftre connect\n",
-				       __func__);
-				priv->plat->request_phy_wol(priv->plat);
-			}
-		} else {
-			pr_info("stmmac phy polling mode\n");
-			priv->phydev->irq = PHY_POLL;
-		}
-#endif
+	if (!priv->plat->mac2mac_en && !priv->plat->phy_intr_en) {
+		ret = priv->plat->phy_intr_enable(priv);
+		if (ret)
+			pr_alert("qcom-ethqos: Unable to enable PHY interrupt\n");
+		else
+			priv->plat->phy_intr_en = true;
 	}
+	if (priv->plat->phy_intr_en_extn_stm && priv->plat->phy_intr_en) {
+		priv->phydev->irq = PHY_IGNORE_INTERRUPT;
+		priv->phydev->interrupts =  PHY_INTERRUPT_ENABLED;
+	}
+
+	if (priv->plat->phy_intr_en_extn_stm && priv->plat->phy_intr_en) {
+		if (priv->phydev->drv->ack_interrupt &&
+		    !priv->phydev->drv->ack_interrupt(priv->phydev)) {
+			pr_info(" qcom-ethqos: %s ack_interrupt successful aftre connect\n",
+				__func__);
+		} else {
+			pr_err(" qcom-ethqos: %s ack_interrupt failed aftre connect\n",
+			       __func__);
+		}
+
+		if (priv->phydev->drv &&
+		    priv->phydev->drv->config_intr &&
+		    !priv->phydev->drv->config_intr(priv->phydev)) {
+			pr_err(" qcom-ethqos: %s config_phy_intr successful aftre connect\n",
+			       __func__);
+			priv->plat->request_phy_wol(priv->plat);
+		}
+	} else {
+		pr_info("stmmac phy polling mode\n");
+		priv->phydev->irq = PHY_POLL;
+	}
+#endif
 
 	return ret;
 }
@@ -3045,6 +3039,19 @@ static int stmmac_open(struct net_device *dev)
 		priv->rx_coal_frames = STMMAC_RX_FRAMES;
 
 #ifdef DEFER_ENABLE_INTERRUPTS
+	if (!priv->plat->mac2mac_en) {
+		ret = priv->plat->phy_intr_enable(priv);
+		if (ret)
+			pr_alert("qcom-ethqos: Unable to enable PHY interrupt\n");
+		else
+			priv->plat->phy_intr_en = true;
+	}
+
+	if (priv->plat->phy_intr_en_extn_stm && priv->plat->phy_intr_en) {
+		priv->phydev->irq = PHY_IGNORE_INTERRUPT;
+		priv->phydev->interrupts =  PHY_INTERRUPT_ENABLED;
+	}
+
 	if (priv->plat->phy_intr_en_extn_stm && priv->plat->phy_intr_en) {
 		if (priv->phydev->drv->ack_interrupt &&
 		    !priv->phydev->drv->ack_interrupt(priv->phydev)) {

@@ -1645,6 +1645,18 @@ static void ethqos_handle_phy_interrupt(struct qcom_ethqos *ethqos)
 	struct stmmac_priv *priv = netdev_priv(dev);
 	int micrel_intr_status = 0;
 
+	/*Interrupt routine shouldn't be called for mac2mac*/
+	if (priv->plat->mac2mac_en) {
+		WARN_ON(1);
+		return;
+	}
+
+	/*If phy driver support interrupt handling use it*/
+	if (priv->phydev && priv->phydev->drv && priv->phydev->drv->handle_interrupt) {
+		priv->phydev->drv->handle_interrupt(priv->phydev);
+		return;
+	}
+
 	if ((priv->phydev && (priv->phydev->phy_id &
 	     priv->phydev->drv->phy_id_mask)
 	     == MICREL_PHY_ID) ||
@@ -1754,7 +1766,7 @@ static int ethqos_phy_intr_enable(void *priv_n)
 	init_completion(&ethqos->clk_enable_done);
 
 	ret = request_irq(ethqos->phy_intr, ETHQOS_PHY_ISR,
-			  IRQF_SHARED, "stmmac", ethqos);
+			  IRQF_SHARED, "emac-phy-intr", ethqos);
 	if (ret) {
 		ETHQOSERR("Unable to register PHY IRQ %d\n",
 			  ethqos->phy_intr);
