@@ -1236,6 +1236,7 @@ struct qcom_ethqos {
 	enum stall_status sw_rx_filtered_ch_status;
 	struct health_monitor_counters *hm_counters;
 	struct kobject* hm_sysfs_kobj;
+	void __iomem *gcc_rgmii_base_addr;
 };
 
 struct pps_cfg {

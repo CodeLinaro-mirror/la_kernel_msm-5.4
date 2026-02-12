@@ -5106,6 +5106,75 @@ static unsigned int ethqos_get_stall_status_bits(struct qcom_ethqos *ethqos, boo
 	return status_bits;
 }
 
+static int ethqos_get_gcc_rgmii_offset(struct qcom_ethqos *ethqos)
+{
+	struct resource *resource = NULL;
+	unsigned long gcc_rgmii_base = 0;
+	unsigned long gcc_rgmii_size = 0;
+	int ret = 0;
+
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	resource = platform_get_resource_byname(ethqos->pdev,
+					IORESOURCE_MEM, "gcc_rgmii");
+
+	if (!resource) {
+		ETHQOSERR("Resource gcc_rgmii not found\n");
+		ret = -EINVAL;
+		goto err_out;
+	}
+
+	gcc_rgmii_base = resource->start;
+	gcc_rgmii_size = resource_size(resource);
+
+	ETHQOSDBG("gcc_rgmii_base = 0x%x, size = 0x%x\n", gcc_rgmii_base, gcc_rgmii_size);
+
+	ethqos->gcc_rgmii_base_addr = ioremap(gcc_rgmii_base, gcc_rgmii_size);
+
+	if (!ethqos->gcc_rgmii_base_addr) {
+		ETHQOSERR("cannot map GCC_EMAC_RGMII_CBCR reg memory, aborting\n");
+		ret = -EIO;
+		goto err_out;
+	}
+	return 0;
+
+err_out:
+	if (ethqos->gcc_rgmii_base_addr)
+		iounmap(ethqos->gcc_rgmii_base_addr);
+	return ret;
+}
+
+static int ethqos_reset_rgmii_clk(struct qcom_ethqos *ethqos)
+{
+	int ret = 0;
+	u32 val;
+
+	clk_disable_unprepare(ethqos->rgmii_clk);
+
+	val = readl(ethqos->gcc_rgmii_base_addr);
+	val |= EMAC_RGMII_ARES_MASK;	/* set to 1 */
+	writel(val, ethqos->gcc_rgmii_base_addr);
+
+	usleep_range(10000, 20000);
+
+	val = readl(ethqos->gcc_rgmii_base_addr);
+	val &= ~EMAC_RGMII_ARES_MASK;	/* set to 0 */
+	writel(val, ethqos->gcc_rgmii_base_addr);
+
+	ret = clk_prepare_enable(ethqos->rgmii_clk);
+	if (ret)
+	{
+		ETHQOSERR("clk_prepare_enable failed");
+		return ret;
+	}
+	clk_set_rate(ethqos->rgmii_clk, ethqos->rgmii_clk_rate);
+
+	return ret;
+}
+
 static int ethqos_mac_recovery(struct qcom_ethqos *ethqos, struct stmmac_priv *priv)
 {
 	int ret = 0;
@@ -5134,6 +5203,12 @@ static int ethqos_mac_recovery(struct qcom_ethqos *ethqos, struct stmmac_priv *p
 	stmmac_flush_all_mtl_tx(priv);
 
 	dev_close(priv->dev);
+
+	ret = ethqos_reset_rgmii_clk(ethqos);
+	if (ret) {
+		ETHQOSERR("Failed to reset the rgmii clk: %d\n", ret);
+		goto unlock;
+	}
 
 	usleep_range(10000, 20000);
 
@@ -6001,6 +6076,12 @@ static int ethqos_initialize_healthmonitor(struct qcom_ethqos *ethqos)
 		return -EINVAL;
 	}
 
+	ret = ethqos_get_gcc_rgmii_offset(ethqos);
+	if (ret) {
+		ETHQOSERR("Failed to get GCC RGMII offset %d\n", ret);
+		return ret;
+	}
+
 	ethqos->old_hm_stats = kzalloc(sizeof(struct health_monitor), GFP_KERNEL);
 	if (!ethqos->old_hm_stats)
 		return -ENOMEM;
@@ -6096,6 +6177,11 @@ static int ethqos_cleanup_healthmonitor(struct qcom_ethqos *ethqos)
 		ethqos_free_hm_stats(ethqos->new_hm_stats);
 		kfree(ethqos->new_hm_stats);
 		ethqos->new_hm_stats = NULL;
+	}
+
+	if (ethqos->gcc_rgmii_base_addr) {
+		iounmap(ethqos->gcc_rgmii_base_addr);
+		ethqos->gcc_rgmii_base_addr = NULL;
 	}
 
 	return 0;
