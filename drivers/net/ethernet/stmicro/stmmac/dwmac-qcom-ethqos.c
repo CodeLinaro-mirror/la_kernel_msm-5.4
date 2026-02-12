@@ -11,7 +11,6 @@
 #include <linux/phy.h>
 #include <linux/regulator/consumer.h>
 #include <linux/of_gpio.h>
-#include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/mii.h>
 #include <linux/of_mdio.h>
@@ -37,7 +36,7 @@
 #include "stmmac_ptp.h"
 #include "dwmac-qcom-ipa-offload.h"
 #include "dwmac4.h"
-
+#include "dwmac4_dma.h"
 
 #include <linux/dwmac-qcom-eth-autosar.h>
 
@@ -4456,51 +4455,1378 @@ static void ethqos_get_cv2x_dt(struct qcom_ethqos *ethqos,
 	}
 }
 
-static ssize_t ethqos_show_health_status(struct device *dev,
-			struct device_attribute *attr, char *user_buf)
+static bool ethqos_is_dma_pointer_stuck(dma_addr_t old_dma_ptr, dma_addr_t new_dma_ptr)
 {
+	return (old_dma_ptr == new_dma_ptr);
+}
+
+static bool ethqos_is_mac_counter_stuck(u32 old_mmc_octetcount_gb, u32 new_mmc_octetcount_gb)
+{
+	if (old_mmc_octetcount_gb == new_mmc_octetcount_gb)
+	{
+		return true;
+	}
+	return false;
+}
+
+static bool ethqos_is_sw_counter_stuck(u32 old_pkt_n, u32 new_pkt_n)
+{
+	if (old_pkt_n == new_pkt_n)
+	{
+		return true;
+	}
+	return false;
+}
+
+static bool ethqos_is_dma_status_faulty(u32 rps)
+{
+	return (rps == DMA_RX_STATE_IDLE || rps == DMA_RX_STATE_SUSPENDED);
+}
+
+static bool ethqos_is_rx_channel_pointer_stuck(struct dma_stats *old_rx_dma_stats,
+			struct dma_stats *new_rx_dma_stats)
+{
+	bool is_rx_dma_cur_ptr_stuck = ethqos_is_dma_pointer_stuck(old_rx_dma_stats->current_pointer,
+				new_rx_dma_stats->current_pointer);
+	u32 ring_len = (new_rx_dma_stats->ring_length * DMA_DESCRIPTOR_SIZE);
+	bool is_rx_dma_overflow = new_rx_dma_stats->tail_pointer >
+				new_rx_dma_stats->head_pointer + ring_len;
+	bool is_rx_dma_underflow = new_rx_dma_stats->head_pointer > new_rx_dma_stats->current_pointer;
+
+	return (is_rx_dma_underflow || is_rx_dma_overflow || is_rx_dma_cur_ptr_stuck);
+}
+
+static int ethqos_reset_dma_channel_stats(struct qcom_ethqos *ethqos, u32 chan_num,
+				enum direction dir, struct stmmac_priv *priv)
+{
+	if (!ethqos || !ethqos->new_hm_stats) {
+		ETHQOSERR("ethqos or new_hm_stats is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		return -EINVAL;
+	}
+
+	// Validate channel number based on direction
+	if (dir == DIRECTION_TX) {
+		if (chan_num >= priv->plat->tx_queues_to_use || chan_num < 0) {
+			ETHQOSERR("Invalid TX channel number: %u (valid range: 0-%u)\n",
+				chan_num, priv->plat->tx_queues_to_use - 1);
+			return -EINVAL;
+		}
+
+		if (!ethqos->new_hm_stats->tx_dma_stats[chan_num]) {
+			ETHQOSERR("TX DMA stats for channel %u is NULL\n", chan_num);
+			return -EINVAL;
+		}
+
+		// Reset TX DMA stats
+		ethqos->new_hm_stats->tx_dma_stats[chan_num]->head_pointer = 0;
+		ethqos->new_hm_stats->tx_dma_stats[chan_num]->current_pointer = 0;
+		ethqos->new_hm_stats->tx_dma_stats[chan_num]->tail_pointer = 0;
+	} else if (dir == DIRECTION_RX) {
+		if (chan_num >= priv->plat->rx_queues_to_use || chan_num < 0) {
+			ETHQOSERR("Invalid RX channel number: %u (valid range: 0-%u)\n",
+				chan_num, priv->plat->rx_queues_to_use - 1);
+			return -EINVAL;
+		}
+
+		if (!ethqos->new_hm_stats->rx_dma_stats[chan_num]) {
+			ETHQOSERR("RX DMA stats for channel %u is NULL\n", chan_num);
+			return -EINVAL;
+		}
+
+		// Reset RX DMA stats
+		ethqos->new_hm_stats->rx_dma_stats[chan_num]->head_pointer = 0;
+		ethqos->new_hm_stats->rx_dma_stats[chan_num]->current_pointer = 0;
+		ethqos->new_hm_stats->rx_dma_stats[chan_num]->tail_pointer = 0;
+	} else {
+		ETHQOSERR("Invalid direction: %d\n", dir);
+		return -EINVAL;
+	}
+
 	return 0;
 }
 
-static DEVICE_ATTR(status, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_status, NULL);
+static void ethqos_reset_mmc_counters(struct qcom_ethqos *ethqos)
+{
+	ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb = 0;
+	ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb = 0;
+	ethqos->new_hm_stats->cm_hw_stats->mmc_rx_fifo_overflow = 0;
+	ethqos->new_hm_stats->cm_hw_stats->iomacro_error = 0;
+}
+
+static bool ethqos_is_mac_hw_stalled(enum stall_status tx_hw_status,
+                             enum stall_status tx_sw_status,
+                             enum stall_status rx_hw_status,
+                             enum stall_status rx_sw_status)
+{
+    return (tx_hw_status == MAC_HW_STALLED ||
+            tx_sw_status == MAC_HW_STALLED ||
+            rx_hw_status == MAC_HW_STALLED ||
+            rx_sw_status == MAC_HW_STALLED);
+}
+
+static bool ethqos_is_hw_path_stalled(enum stall_status tx_hw_status,
+                              enum stall_status rx_hw_status)
+{
+    return (tx_hw_status == TX_HW_PATH_STALLED ||
+            rx_hw_status == RX_HW_PATH_STALLED);
+}
+
+static bool ethqos_is_sw_tx_path_stalled(enum stall_status tx_sw_status)
+{
+    return (tx_sw_status == TX_SW_PATH_STALLED);
+}
+
+static bool ethqos_is_sw_rx_path_stalled(enum stall_status rx_sw_status)
+{
+    return (rx_sw_status == RX_SW_PATH_STALLED);
+}
+
+static unsigned int ethqos_format_status_output(char *buf, unsigned int buf_len,
+			unsigned int status_bits)
+{
+	return scnprintf(buf, buf_len,
+				"MAC HW is %s\n"
+				"HW path is %s\n"
+				"SW tx path is %s\n"
+				"SW rx path is %s\n",
+				(status_bits & STATUS_MAC_HW_STALLED) ? "stalled" : "not stalled",
+				(status_bits & STATUS_HW_PATH_STALLED) ? "stalled" : "not stalled",
+				(status_bits & STATUS_SW_TX_STALLED) ? "stalled" : "not stalled",
+				(status_bits & STATUS_SW_RX_STALLED) ? "stalled" : "not stalled");
+}
+
+static int ethqos_trigger_mac_error(struct qcom_ethqos *ethqos)
+{
+	u32 val;
+
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!ethqos->ioaddr) {
+		ETHQOSERR("ioaddr is NULL\n");
+		return -EINVAL;
+	}
+
+	val = readl(ethqos->ioaddr + MAC_CONFIGURATION);
+	val &= ~(MAC_TE | MAC_RE);
+	writel(val, ethqos->ioaddr + MAC_CONFIGURATION);
+
+	ethqos->trigger_mac_error_flag = true;
+	return 0;
+}
+
+static int ethqos_disable_dma_channel(struct qcom_ethqos *ethqos, u32 offset)
+{
+	u32 val;
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!ethqos->ioaddr) {
+		ETHQOSERR("ioaddr is NULL\n");
+		return -EINVAL;
+	}
+
+	if (offset < MAC_DMA_CH0_TX_CONTROL || offset > MAC_DMA_CH2_RX_CONTROL) {
+		ETHQOSERR("Invalid DMA channel offset: 0x%x\n", offset);
+		return -EINVAL;
+	}
+
+	val = readl(ethqos->ioaddr + offset);
+	val &= ~MAC_CH_START;
+	writel(val, ethqos->ioaddr + offset);
+
+	return 0;
+}
+
+static int ethqos_read_mac_counters(struct qcom_ethqos *ethqos, struct stmmac_priv *priv)
+{
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!priv->mmcaddr) {
+		ETHQOSERR("mmcaddr is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!ethqos->new_hm_stats || !ethqos->new_hm_stats->cm_hw_stats) {
+		ETHQOSERR("cm_hw_stats is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!ethqos->new_hm_stats->cm_hw_stats->mmc_cnts) {
+		ETHQOSERR("mmc_cnts is NULL\n");
+		return -EINVAL;
+	}
+
+	ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb =
+		readl(priv->mmcaddr + MMC_TX_OCTETCOUNT_GB);
+	ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb =
+		readl(priv->mmcaddr + MMC_RX_OCTETCOUNT_GB);
+
+	ethqos->new_hm_stats->cm_hw_stats->mmc_rx_fifo_overflow =
+		readl(priv->mmcaddr + MMC_RX_FIFO_OVERFLOW);
+
+	ethqos->new_hm_stats->cm_hw_stats->iomacro_error +=
+		readl(priv->mmcaddr + MMC_RX_CRC_ERROR);
+	ethqos->new_hm_stats->cm_hw_stats->iomacro_error +=
+		readl(priv->mmcaddr + MMC_RX_ALIGN_ERROR);
+	ethqos->new_hm_stats->cm_hw_stats->iomacro_error +=
+		readl(priv->mmcaddr + MMC_RX_RUN_ERROR);
+	ethqos->new_hm_stats->cm_hw_stats->iomacro_error +=
+		readl(priv->mmcaddr + MMC_RX_JABBER_ERROR);
+	ethqos->new_hm_stats->cm_hw_stats->iomacro_error +=
+		readl(priv->mmcaddr + MMC_RX_LENGTH_ERROR);
+	ethqos->new_hm_stats->cm_hw_stats->iomacro_error +=
+		readl(priv->mmcaddr + MMC_RX_WATCHDOG_ERROR);
+
+	if (ethqos->trigger_mac_error_flag) {
+		ethqos->new_hm_stats->cm_hw_stats->iomacro_error++;
+	}
+
+	return 0;
+}
+
+static int ethqos_read_dma_stats(struct qcom_ethqos *ethqos)
+{
+	int i;
+
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!ethqos->ioaddr) {
+		ETHQOSERR("ioaddr is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!ethqos->new_hm_stats) {
+		ETHQOSERR("new_hm_stats is NULL\n");
+		return -EINVAL;
+	}
+
+	for (i = DMA_CH0; i <= DMA_CH1; i++) {
+		if (!ethqos->new_hm_stats->tx_dma_stats[i]) {
+			ETHQOSERR("tx_dma_stats[%d] is NULL\n", i);
+			return -EINVAL;
+		}
+	}
+
+	for (i = DMA_CH0; i <= DMA_CH2; i++) {
+		if (!ethqos->new_hm_stats->rx_dma_stats[i]) {
+			ETHQOSERR("rx_dma_stats[%d] is NULL\n", i);
+			return -EINVAL;
+		}
+	}
+
+	/* Read DMA TX HW stats (channel 0) */
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH0]->head_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_TX_BASE_ADDR(TX_HW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH0]->current_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_CUR_TX_DESC(TX_HW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH0]->tail_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_TX_END_ADDR(TX_HW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH0]->ring_length =
+		readl(ethqos->ioaddr + DMA_CHAN_TX_RING_LEN(TX_HW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH0]->channel_number = TX_HW_CHANNEL_NUMBER;
+
+	/* Read DMA TX SW stats (channel 1) */
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH1]->head_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_TX_BASE_ADDR(TX_SW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH1]->current_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_CUR_TX_DESC(TX_SW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH1]->tail_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_TX_END_ADDR(TX_SW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH1]->ring_length =
+		readl(ethqos->ioaddr + DMA_CHAN_TX_RING_LEN(TX_SW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->tx_dma_stats[DMA_CH1]->channel_number = TX_SW_CHANNEL_NUMBER;
+
+	/* Read DMA RX HW stats (channel 0) */
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH0]->head_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_RX_BASE_ADDR(RX_HW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH0]->current_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_CUR_RX_DESC(RX_HW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH0]->tail_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_RX_END_ADDR(RX_HW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH0]->ring_length =
+		readl(ethqos->ioaddr + DMA_CHAN_RX_RING_LEN(RX_HW_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH0]->channel_number = RX_HW_CHANNEL_NUMBER;
+
+	/* Read DMA RX SW unfiltered stats (channel 1) */
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH1]->head_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_RX_BASE_ADDR(RX_SW_UNFILTERED_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH1]->current_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_CUR_RX_DESC(RX_SW_UNFILTERED_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH1]->tail_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_RX_END_ADDR(RX_SW_UNFILTERED_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH1]->ring_length =
+		readl(ethqos->ioaddr + DMA_CHAN_RX_RING_LEN(RX_SW_UNFILTERED_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH1]->channel_number = RX_SW_UNFILTERED_CHANNEL_NUMBER;
+
+	/* Read DMA RX SW filtered stats (channel 2) */
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH2]->head_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_RX_BASE_ADDR(RX_SW_FILTERED_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH2]->current_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_CUR_RX_DESC(RX_SW_FILTERED_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH2]->tail_pointer =
+		(dma_addr_t)readl(ethqos->ioaddr + DMA_CHAN_RX_END_ADDR(RX_SW_FILTERED_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH2]->ring_length =
+		readl(ethqos->ioaddr + DMA_CHAN_RX_RING_LEN(RX_SW_FILTERED_CHANNEL_NUMBER));
+	ethqos->new_hm_stats->rx_dma_stats[DMA_CH2]->channel_number = RX_SW_FILTERED_CHANNEL_NUMBER;
+
+	/* Read DMA Debug status */
+	ethqos->new_hm_stats->dma_debug_status0 =
+		readl(ethqos->ioaddr + EMAC_DMA_DEBUG_STATUS0);
+
+	return 0;
+}
+
+static int ethqos_read_driver_stats(struct qcom_ethqos *ethqos, struct stmmac_priv *priv)
+{
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!ethqos->new_hm_stats) {
+		ETHQOSERR("new_hm_stats is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!ethqos->new_hm_stats->sw_path_dvr_stats) {
+		ETHQOSERR("sw_path_dvr_stats is NULL\n");
+		return -EINVAL;
+	}
+
+	/* Read driver statistics */
+	ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_n = priv->xstats.tx_pkt_n;
+	ethqos->new_hm_stats->sw_path_dvr_stats->rx_pkt_n = priv->xstats.rx_pkt_n;
+	ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_nw_stack = priv->xstats.tx_pkt_nw_stack;
+
+	return 0;
+}
+
+static int ethqos_copy_health_monitor_stats(struct health_monitor *old, struct health_monitor *new)
+{
+	int i;
+
+	if (!old || !new)
+		return -EINVAL;
+
+	// Copy common_hw_stats
+	if (new->cm_hw_stats && old->cm_hw_stats) {
+		if (new->cm_hw_stats->mmc_cnts && old->cm_hw_stats->mmc_cnts) {
+			memcpy(old->cm_hw_stats->mmc_cnts,
+				new->cm_hw_stats->mmc_cnts,
+				sizeof(struct mmc_counters));
+		} else {
+			ETHQOSERR("mmc_cnts is NULL\n");
+			return -EINVAL;
+		}
+		old->cm_hw_stats->mmc_rx_fifo_overflow = new->cm_hw_stats->mmc_rx_fifo_overflow;
+		old->cm_hw_stats->iomacro_error = new->cm_hw_stats->iomacro_error;
+	}
+	else
+	{
+		ETHQOSERR("cm_hw_stats is NULL\n");
+		return -EINVAL;
+	}
+
+	// Copy tx_dma_stats
+	for (i = DMA_CH0; i <= DMA_CH1; i++) {
+		if (new->tx_dma_stats[i] && old->tx_dma_stats[i]) {
+			memcpy(old->tx_dma_stats[i],
+				new->tx_dma_stats[i],
+				sizeof(struct dma_stats));
+		} else {
+			ETHQOSERR("tx_dma_stats[%d] is NULL\n", i);
+			return -EINVAL;
+		}
+	}
+
+	// Copy rx_dma_stats
+	for (i = DMA_CH0; i <= DMA_CH2; i++) {
+		if (new->rx_dma_stats[i] && old->rx_dma_stats[i]) {
+			memcpy(old->rx_dma_stats[i],
+				new->rx_dma_stats[i],
+				sizeof(struct dma_stats));
+		} else {
+			ETHQOSERR("rx_dma_stats[%d] is NULL\n", i);
+			return -EINVAL;
+		}
+	}
+
+	old->dma_debug_status0 = new->dma_debug_status0;
+
+	// Copy sw_path_driver_stats
+	if (new->sw_path_dvr_stats && old->sw_path_dvr_stats) {
+		memcpy(old->sw_path_dvr_stats,
+			new->sw_path_dvr_stats,
+			sizeof(struct sw_path_driver_stats));
+	} else {
+		ETHQOSERR("sw_path_dvr_stats is NULL\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static enum stall_status ethqos_tx_hw_stall_status(struct health_monitor *old,
+			struct health_monitor *new)
+{
+	bool is_tx_hw_tail_ptr_stuck;
+	bool is_tx_hw_cur_ptr_stuck;
+	bool is_tx_mmc_stuck;
+
+	if (!old || !new) {
+		return UNKNOWN;
+	}
+
+	// Tx HW Path
+	is_tx_hw_tail_ptr_stuck = ethqos_is_dma_pointer_stuck(new->tx_dma_stats[0]->tail_pointer,
+				old->tx_dma_stats[0]->tail_pointer);
+	is_tx_hw_cur_ptr_stuck = ethqos_is_dma_pointer_stuck(new->tx_dma_stats[0]->current_pointer,
+				old->tx_dma_stats[0]->current_pointer);
+	is_tx_mmc_stuck = ethqos_is_mac_counter_stuck(old->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb
+					, new->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb) &&
+				!ethqos_is_mac_counter_stuck(old->cm_hw_stats->iomacro_error,
+					new->cm_hw_stats->iomacro_error);
+
+	if (is_tx_hw_tail_ptr_stuck) {
+		return NO_DATA_AT_ETH;
+	}
+
+	if(is_tx_hw_cur_ptr_stuck) {
+		return TX_HW_PATH_STALLED;
+	}
+
+	if (is_tx_mmc_stuck) {
+		return MAC_HW_STALLED;
+	}
+
+	return NO_STALL;
+}
+
+static enum stall_status ethqos_tx_sw_stall_status(struct health_monitor *old,
+			struct health_monitor *new)
+{
+	bool is_tx_pkt_nw_stuck;
+	bool is_tx_sw_cur_ptr_stuck;
+	bool is_tx_mmc_stuck;
+
+	if (!old || !new) {
+		return UNKNOWN;
+	}
+
+	is_tx_pkt_nw_stuck = ethqos_is_sw_counter_stuck(old->sw_path_dvr_stats->tx_pkt_nw_stack,
+				new->sw_path_dvr_stats->tx_pkt_nw_stack);
+	is_tx_sw_cur_ptr_stuck = ethqos_is_dma_pointer_stuck(old->tx_dma_stats[1]->current_pointer,
+				new->tx_dma_stats[1]->current_pointer);
+	is_tx_mmc_stuck = ethqos_is_mac_counter_stuck(old->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb
+					, new->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb) &&
+				!ethqos_is_mac_counter_stuck(old->cm_hw_stats->iomacro_error,
+					new->cm_hw_stats->iomacro_error);
+
+	// Tx Sw Path
+	if (is_tx_pkt_nw_stuck) {
+		return NO_DATA_AT_ETH;
+	}
+
+	if (is_tx_sw_cur_ptr_stuck) {
+		return TX_SW_PATH_STALLED;
+	}
+
+	if (is_tx_mmc_stuck) {
+		return MAC_HW_STALLED;
+	}
+
+	return NO_STALL;
+}
+
+static enum stall_status ethqos_rx_hw_stall_status(struct health_monitor *old,
+			struct health_monitor *new, bool ipa_offload_suspended)
+{
+	bool is_rx_mmc_stuck;
+	bool is_rx_hw_channel_stuck;
+
+	if (!old || !new) {
+		return UNKNOWN;
+	}
+
+	is_rx_mmc_stuck = ethqos_is_mac_counter_stuck(old->sw_path_dvr_stats->rx_pkt_n,
+					new->sw_path_dvr_stats->rx_pkt_n) &&
+				!ethqos_is_mac_counter_stuck(old->cm_hw_stats->iomacro_error,
+					new->cm_hw_stats->iomacro_error);
+	is_rx_hw_channel_stuck = ethqos_is_rx_channel_pointer_stuck(old->rx_dma_stats[0],
+				new->rx_dma_stats[0]);
+
+	if (is_rx_mmc_stuck) {
+		return MAC_HW_STALLED;
+	}
+
+	if (is_rx_hw_channel_stuck) {
+		u32 rps0 = (new->dma_debug_status0 >> DMA_DEBUG_STATUS0_RX_STATE_POS_CH0) &
+			DMA_DEBUG_STATUS0_RX_STATE_MASK_CH0;
+		if (ethqos_is_dma_status_faulty(rps0) && !ipa_offload_suspended) {
+			return RX_HW_PATH_STALLED;
+		}
+	}
+
+	return NO_STALL;
+}
+
+static enum stall_status ethqos_rx_sw_stall_status(struct health_monitor *old,
+			struct health_monitor *new, int channel)
+{
+	bool is_rx_mmc_stuck;
+	bool is_rx_sw_channel_stuck;
+	bool is_rx_pkt_n_stuck;
+
+	if (!old || !new) {
+		return UNKNOWN;
+	}
+
+	is_rx_mmc_stuck = ethqos_is_mac_counter_stuck(old->sw_path_dvr_stats->rx_pkt_n,
+					new->sw_path_dvr_stats->rx_pkt_n) &&
+				!ethqos_is_mac_counter_stuck(old->cm_hw_stats->iomacro_error,
+					new->cm_hw_stats->iomacro_error);
+	is_rx_sw_channel_stuck = ethqos_is_rx_channel_pointer_stuck(old->rx_dma_stats[channel],
+				new->rx_dma_stats[channel]);
+	is_rx_pkt_n_stuck = ethqos_is_sw_counter_stuck(old->sw_path_dvr_stats->rx_pkt_n,
+					new->sw_path_dvr_stats->rx_pkt_n);
+
+	if (is_rx_mmc_stuck) {
+		return MAC_HW_STALLED;
+	}
+
+	if (is_rx_sw_channel_stuck) {
+		if (channel == RX_SW_UNFILTERED_CHANNEL_NUMBER)
+		{
+			u32 rps1 = (new->dma_debug_status0 >> DMA_DEBUG_STATUS0_RX_STATE_POS_CH1) &
+				DMA_DEBUG_STATUS0_RX_STATE_MASK_CH1;
+			if (ethqos_is_dma_status_faulty(rps1)) {
+				return RX_SW_PATH_STALLED;
+			}
+		}
+		else if (channel == RX_SW_FILTERED_CHANNEL_NUMBER)
+		{
+			u32 rps2 = (new->dma_debug_status0 >> DMA_DEBUG_STATUS0_RX_STATE_POS_CH2) &
+				DMA_DEBUG_STATUS0_RX_STATE_MASK_CH2;
+			if (ethqos_is_dma_status_faulty(rps2)) {
+				return RX_SW_PATH_STALLED;
+			}
+		}
+		else
+		{
+			return UNKNOWN;
+		}
+	}
+	else if (is_rx_pkt_n_stuck)
+	{
+		return RX_SW_PATH_STALLED;
+	}
+
+	return NO_STALL;
+}
+
+static unsigned int ethqos_get_stall_status_bits(struct qcom_ethqos *ethqos, bool use_l3_l4_filters,
+			bool ipa_offload_suspended)
+{
+	unsigned int status_bits = 0;
+	enum stall_status tx_hw_status, tx_sw_status, rx_hw_status, rx_sw_status;
+
+	tx_hw_status = ethqos_tx_hw_stall_status(ethqos->old_hm_stats, ethqos->new_hm_stats);
+	tx_sw_status = ethqos_tx_sw_stall_status(ethqos->old_hm_stats, ethqos->new_hm_stats);
+	rx_hw_status = ethqos_rx_hw_stall_status(ethqos->old_hm_stats, ethqos->new_hm_stats,
+				ipa_offload_suspended);
+	rx_sw_status = NO_STALL;
+
+	if (use_l3_l4_filters) {
+		ethqos->sw_rx_filtered_ch_status = ethqos_rx_sw_stall_status(ethqos->old_hm_stats,
+					ethqos->new_hm_stats, RX_SW_FILTERED_CHANNEL_NUMBER);
+	}
+
+	if (ipa_offload_suspended)
+	{
+		ethqos->sw_rx_unfiltered_ch_status = ethqos_rx_sw_stall_status(ethqos->old_hm_stats,
+					ethqos->new_hm_stats, RX_SW_UNFILTERED_CHANNEL_NUMBER);
+	}
+
+	if (ethqos->sw_rx_filtered_ch_status == RX_SW_PATH_STALLED ||
+		ethqos->sw_rx_unfiltered_ch_status == RX_SW_PATH_STALLED)
+	{
+		rx_sw_status = RX_SW_PATH_STALLED;
+	}
+
+	if (ethqos_is_mac_hw_stalled(tx_hw_status, tx_sw_status, rx_hw_status, rx_sw_status))
+	{
+		status_bits |= STATUS_MAC_HW_STALLED;
+		ethqos->hm_counters->mac_hw_stall_count++;
+	}
+
+	if (ethqos_is_hw_path_stalled(tx_hw_status, rx_hw_status))
+	{
+		status_bits |= STATUS_HW_PATH_STALLED;
+		ethqos->hm_counters->hw_path_stall_count++;
+	}
+
+	if (ethqos_is_sw_tx_path_stalled(tx_sw_status))
+	{
+		status_bits |= STATUS_SW_TX_STALLED;
+		ethqos->hm_counters->sw_tx_path_stall_count++;
+	}
+
+	if (ethqos_is_sw_rx_path_stalled(rx_sw_status))
+	{
+		status_bits |= STATUS_SW_RX_STALLED;
+		ethqos->hm_counters->sw_rx_path_stall_count++;
+	}
+
+	return status_bits;
+}
+
+static int ethqos_mac_recovery(struct qcom_ethqos *ethqos, struct stmmac_priv *priv)
+{
+	int ret = 0;
+
+	if (!ethqos || !priv) {
+		ETHQOSERR("ethqos or priv is NULL\n");
+		return -EINVAL;
+	}
+
+	// Set up MAC-to-MAC mode with current speed
+	priv->plat->mac2mac_en = true;
+	priv->plat->mac2mac_rgmii_speed = ethqos->speed;
+
+	rtnl_lock();
+
+	// Disable interrupts
+	if (priv->dev->irq > 0)
+		disable_irq(priv->dev->irq);
+	if (priv->wol_irq > 0 && priv->wol_irq != priv->dev->irq)
+		disable_irq(priv->wol_irq);
+	if (priv->lpi_irq > 0 && priv->lpi_irq != priv->dev->irq)
+		disable_irq(priv->lpi_irq);
+
+	// Stop DMA and flush MTL TX queues
+	stmmac_stop_all_dma(priv);
+	stmmac_flush_all_mtl_tx(priv);
+
+	dev_close(priv->dev);
+
+	usleep_range(10000, 20000);
+
+	ret = dev_open(priv->dev, NULL);
+	if (ret) {
+		ETHQOSERR("Failed to reopen device: %d\n", ret);
+		goto unlock;
+	}
+
+unlock:
+	rtnl_unlock();
+
+	if (!ret) {
+		// Reset counters and clear error flag
+		ethqos_reset_mmc_counters(ethqos);
+		ethqos->trigger_mac_error_flag = false;
+		ethqos->hm_counters->mac_hw_recovery_count++;
+	}
+
+	return ret;
+}
+
+static ssize_t ethqos_show_health_status(struct device *dev,
+			struct device_attribute *attr, char *user_buf)
+{
+	struct net_device *netdev;
+	unsigned int len = 0, buf_len = 2000;
+	char *buf;
+	struct device *parent;
+	struct stmmac_priv *priv;
+	struct qcom_ethqos *ethqos;
+	unsigned int status_bits;
+	bool use_l3_l4_filters;
+	bool ipa_offload_suspended;
+	int ret;
+
+	parent = kobj_to_dev(dev->kobj.parent);
+	if (!parent) {
+		ETHQOSERR("parent is NULL\n");
+		return -EINVAL;
+	}
+
+	netdev = to_net_dev(parent);
+	if (!netdev) {
+		ETHQOSERR("netdev is NULL\n");
+		return -EINVAL;
+	}
+
+	priv = netdev_priv(netdev);
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		return -EINVAL;
+	}
+
+	ethqos = (struct qcom_ethqos *)priv->plat->bsp_priv;
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	buf = kzalloc(buf_len, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (!netif_running(netdev)) {
+		len += scnprintf(buf + len, buf_len - len, "netif is not running\n");
+		goto copy_to_user;
+	}
+
+	if (!netif_carrier_ok(netdev)) {
+		len += scnprintf(buf + len, buf_len - len, "phy link down\n");
+		goto copy_to_user;
+	}
+
+	/* Collect statistics */
+	ret = ethqos_read_mac_counters(ethqos, priv);
+	if (ret) {
+		ETHQOSERR("Failed to read MAC counters: %d\n", ret);
+		len += scnprintf(buf + len, buf_len - len, "Failed to read MAC counters\n");
+		goto copy_to_user;
+	}
+
+	ret = ethqos_read_dma_stats(ethqos);
+	if (ret) {
+		ETHQOSERR("Failed to read DMA stats: %d\n", ret);
+		len += scnprintf(buf + len, buf_len - len, "Failed to read DMA stats\n");
+		goto copy_to_user;
+	}
+
+	ret = ethqos_read_driver_stats(ethqos, priv);
+	if (ret) {
+		ETHQOSERR("Failed to read driver stats: %d\n", ret);
+		len += scnprintf(buf + len, buf_len - len, "Failed to read driver stats\n");
+		goto copy_to_user;
+	}
+
+	use_l3_l4_filters = (priv->num_l3_l4_filters > 0);
+	ipa_offload_suspended = ethqos_is_be_ipa_offload_suspended();
+
+	status_bits = ethqos_get_stall_status_bits(ethqos,
+			use_l3_l4_filters, ipa_offload_suspended);
+
+	len += ethqos_format_status_output(buf, buf_len, status_bits);
+
+	len += scnprintf(buf + len, buf_len - len,
+			"L3/L4 filters count: %d\n",
+			priv->num_l3_l4_filters);
+	len += scnprintf(buf + len, buf_len - len,
+			"ipa_offload_suspended: %d\n",
+			ipa_offload_suspended);
+
+	/* Copy current stats to old stats for next comparison */
+	ret = ethqos_copy_health_monitor_stats(ethqos->old_hm_stats, ethqos->new_hm_stats);
+	if (ret) {
+		ETHQOSERR("Failed to copy health monitor stats: %d\n", ret);
+		kfree(buf);
+		return ret;
+	}
+
+copy_to_user:
+	if (len > buf_len)
+		len = buf_len;
+
+	ETHQOSDBG("%s", buf);
+
+	memcpy(user_buf, buf, len);
+	kfree(buf);
+
+	return len;
+}
 
 static ssize_t ethqos_show_health_stats(struct device *dev,
 			struct device_attribute *attr, char *user_buf)
 {
-	return 0;
-}
+	struct net_device *netdev;
+	unsigned int len = 0, buf_len = 2000;
+	char *buf;
+	struct device *parent = NULL;
+	struct stmmac_priv *priv;
+	struct qcom_ethqos *ethqos;
+	int i;
 
-static DEVICE_ATTR(stats, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_stats, NULL);
+	parent = kobj_to_dev(dev->kobj.parent);
+	netdev = to_net_dev(parent);
+	if (!netdev) {
+		ETHQOSERR("netdev is NULL\n");
+		return -EINVAL;
+	}
+
+	priv = netdev_priv(netdev);
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		return -EINVAL;
+	}
+
+	ethqos = (struct qcom_ethqos *)priv->plat->bsp_priv;
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	buf = kzalloc(buf_len, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	len += scnprintf(buf + len, buf_len - len, "\nHealth_monitor stats dump\n");
+
+	len += scnprintf(buf + len, buf_len - len, "\nCommon stats\n");
+
+	if (ethqos->new_hm_stats && ethqos->new_hm_stats->cm_hw_stats &&
+		ethqos->new_hm_stats->cm_hw_stats->mmc_cnts) {
+		len += scnprintf(buf + len, buf_len - len, "%s  =  0x%x\n", "mmc_tx_octetcount_gb",
+			ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb);
+		len += scnprintf(buf + len, buf_len - len, "%s  =  0x%x\n", "mmc_rx_octetcount_gb",
+			ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb);
+	} else {
+		len += scnprintf(buf + len, buf_len - len, "MMC counters not available\n");
+	}
+
+	if (ethqos->new_hm_stats && ethqos->new_hm_stats->cm_hw_stats) {
+		len += scnprintf(buf + len, buf_len - len, "%s  =  0x%x\n", "mmc_rx_fifo_overflow",
+			ethqos->new_hm_stats->cm_hw_stats->mmc_rx_fifo_overflow);
+		len += scnprintf(buf + len, buf_len - len, "%s  =  0x%x\n", "iomacro_error",
+			ethqos->new_hm_stats->cm_hw_stats->iomacro_error);
+	}
+
+	len += scnprintf(buf + len, buf_len - len, "\nDMA stats\n");
+
+	if (ethqos->new_hm_stats) {
+		for (i = DMA_CH0; i <= DMA_CH1; i++) {
+			len += scnprintf(buf + len, buf_len - len, "\nChannel%d tx stats\n", i);
+
+			if (ethqos->new_hm_stats->tx_dma_stats[i]) {
+				len += scnprintf(buf + len, buf_len - len,
+					"dma_channel%d_tx_base_pointer  =  0x%x\n", i,
+					ethqos->new_hm_stats->tx_dma_stats[i]->head_pointer);
+				len += scnprintf(buf + len, buf_len - len,
+					"dma_channel%d_tx_current_pointer  =  0x%x\n", i,
+					ethqos->new_hm_stats->tx_dma_stats[i]->current_pointer);
+				len += scnprintf(buf + len, buf_len - len,
+					"dma_channel%d_tx_tail_pointer  =  0x%x\n", i,
+					ethqos->new_hm_stats->tx_dma_stats[i]->tail_pointer);
+				len += scnprintf(buf + len, buf_len - len,
+					"DMA channel%d tx ring length  =  0x%x\n", i,
+					ethqos->new_hm_stats->tx_dma_stats[i]->ring_length);
+				len += scnprintf(buf + len, buf_len - len,
+					"DMA channel_number  =  0x%x\n",
+					ethqos->new_hm_stats->tx_dma_stats[i]->channel_number);
+			} else {
+				len += scnprintf(buf + len, buf_len - len,
+					"TX DMA stats for channel %d not available\n", i);
+			}
+		}
+
+		for (i = DMA_CH0; i <= DMA_CH2; i++) {
+			len += scnprintf(buf + len, buf_len - len, "\nChannel%d rx stats\n", i);
+
+			if (ethqos->new_hm_stats->rx_dma_stats[i]) {
+				len += scnprintf(buf + len, buf_len - len,
+					"dma_channel%d_rx_base_pointer  =  0x%x\n", i,
+					ethqos->new_hm_stats->rx_dma_stats[i]->head_pointer);
+				len += scnprintf(buf + len, buf_len - len,
+					"dma_channel%d_rx_current_pointer  =  0x%x\n", i,
+					ethqos->new_hm_stats->rx_dma_stats[i]->current_pointer);
+				len += scnprintf(buf + len, buf_len - len,
+					"dma_channel%d_rx_tail_pointer  =  0x%x\n", i,
+					ethqos->new_hm_stats->rx_dma_stats[i]->tail_pointer);
+				len += scnprintf(buf + len, buf_len - len,
+					"DMA channel%d rx ring length =  0x%x\n", i,
+					ethqos->new_hm_stats->rx_dma_stats[i]->ring_length);
+				len += scnprintf(buf + len, buf_len - len,
+					"DMA channel_number  =  0x%x\n",
+					ethqos->new_hm_stats->rx_dma_stats[i]->channel_number);
+			} else {
+				len += scnprintf(buf + len, buf_len - len,
+					"RX DMA stats for channel %d not available\n", i);
+			}
+		}
+
+		len += scnprintf(buf + len, buf_len - len, "%s  =  0x%x\n",
+			"dma_debug_status0", ethqos->new_hm_stats->dma_debug_status0);
+	} else {
+		len += scnprintf(buf + len, buf_len - len, "DMA stats not available\n");
+	}
+
+	len += scnprintf(buf + len, buf_len - len, "\ndriver stats\n");
+
+	if (ethqos->new_hm_stats && ethqos->new_hm_stats->sw_path_dvr_stats) {
+		len += scnprintf(buf + len, buf_len - len, "%s  =  0x%x\n",
+			"tx_pkt_n",
+			ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_n);
+		len += scnprintf(buf + len, buf_len - len, "%s  =  0x%x\n",
+			"rx_pkt_n",
+			ethqos->new_hm_stats->sw_path_dvr_stats->rx_pkt_n);
+		len += scnprintf(buf + len, buf_len - len, "%s  =  0x%x\n\n",
+			"tx_pkt_nw_stack",
+			ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_nw_stack);
+	} else {
+		len += scnprintf(buf + len, buf_len - len, "Driver stats not available\n\n");
+	}
+
+	if (ethqos->hm_counters) {
+		len += scnprintf(buf + len, buf_len - len,
+			"MAC HW Stall Count %lu\n"
+			"HW Path Stall Count %lu\n"
+			"SW Tx Path Stall Count %lu\n"
+			"SW Rx Path Stall Count %lu\n\n"
+			"MAC HW Recovery Count %lu\n"
+			"SW Tx Path Recovery Count %lu\n"
+			"SW Rx Path Recovery Count %lu\n\n",
+			ethqos->hm_counters->mac_hw_stall_count,
+			ethqos->hm_counters->hw_path_stall_count,
+			ethqos->hm_counters->sw_tx_path_stall_count,
+			ethqos->hm_counters->sw_rx_path_stall_count,
+			ethqos->hm_counters->mac_hw_recovery_count,
+			ethqos->hm_counters->sw_tx_path_recovery_count,
+			ethqos->hm_counters->sw_rx_path_recovery_count);
+	} else {
+		len += scnprintf(buf + len, buf_len - len, "Counter stats not available\n\n");
+	}
+
+	if (len > buf_len)
+		len = buf_len;
+
+	ETHQOSDBG("%s", buf);
+	memcpy(user_buf, buf, len);
+	kfree(buf);
+	return len;
+}
 
 static ssize_t ethqos_show_health_recovery(struct device *dev,
 			struct device_attribute *attr, char *user_buf)
 {
-	return 0;
+	struct device *parent;
+	struct net_device *netdev;
+	struct stmmac_priv *priv;
+	struct qcom_ethqos *ethqos;
+	unsigned int len = 0, buf_len = 2000;
+	char *buf;
+
+	parent = kobj_to_dev(dev->kobj.parent);
+	if (!parent) {
+		ETHQOSERR("parent is NULL\n");
+		return -EINVAL;
+	}
+
+	netdev = to_net_dev(parent);
+	if (!netdev) {
+		ETHQOSERR("netdev is NULL\n");
+		return -EINVAL;
+	}
+
+	priv = netdev_priv(netdev);
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		return -EINVAL;
+	}
+
+	ethqos = (struct qcom_ethqos *)priv->plat->bsp_priv;
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	buf = kzalloc(buf_len, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	len += scnprintf(buf + len, buf_len - len, "Recovery Usage:\n");
+	len += scnprintf(buf + len, buf_len - len, "0 TX SW path recovery\n");
+	len += scnprintf(buf + len, buf_len - len, "1 RX SW path recovery\n");
+	len += scnprintf(buf + len, buf_len - len, "2 MAC HW recovery\n");
+
+	if (len > buf_len)
+		len = buf_len;
+
+	ETHQOSDBG("%s", buf);
+	memcpy(user_buf, buf, len);
+	kfree(buf);
+	return len;
 }
+
+static ssize_t ethqos_show_health_trigger_stall(struct device *dev,
+			struct device_attribute *attr, char *user_buf)
+{
+	struct device *parent;
+	struct net_device *netdev;
+	struct stmmac_priv *priv;
+	struct qcom_ethqos *ethqos;
+	unsigned int len = 0, buf_len = 2000;
+	char *buf;
+
+	parent = kobj_to_dev(dev->kobj.parent);
+	if (!parent) {
+		ETHQOSERR("parent is NULL\n");
+		return -EINVAL;
+	}
+
+	netdev = to_net_dev(parent);
+	if (!netdev) {
+		ETHQOSERR("netdev is NULL\n");
+		return -EINVAL;
+	}
+
+	priv = netdev_priv(netdev);
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		return -EINVAL;
+	}
+
+	ethqos = (struct qcom_ethqos *)priv->plat->bsp_priv;
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		return -EINVAL;
+	}
+
+	buf = kzalloc(buf_len, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	len += scnprintf(buf + len, buf_len - len, "Last Triggered Error: ");
+
+	switch (ethqos->last_triggered_error) {
+	case INVALID_ERROR:
+		len += scnprintf(buf + len, buf_len - len, "No error triggered\n");
+		break;
+	case TRIGGER_MAC_ERROR:
+		len += scnprintf(buf + len, buf_len - len, "MAC error triggered\n");
+		break;
+	case TRIGGER_DMA_CH0_TX_ERROR:
+		len += scnprintf(buf + len, buf_len - len, "DMA CH0 TX error triggered\n");
+		break;
+	case TRIGGER_DMA_CH0_RX_ERROR:
+		len += scnprintf(buf + len, buf_len - len, "DMA CH0 RX error triggered\n");
+		break;
+	case TRIGGER_DMA_CH1_TX_ERROR:
+		len += scnprintf(buf + len, buf_len - len, "DMA CH1 TX error triggered\n");
+		break;
+	case TRIGGER_DMA_CH2_RX_ERROR:
+		len += scnprintf(buf + len, buf_len - len, "DMA CH2 RX error triggered\n");
+		break;
+	case TRIGGER_HALT_ERRORS:
+		len += scnprintf(buf + len, buf_len - len, "All errors halted\n");
+		break;
+	default:
+		len += scnprintf(buf + len, buf_len - len, "Unknown error state\n");
+		break;
+	}
+
+	len += scnprintf(buf + len, buf_len - len, "\nTrigger Stall Usage:\n");
+	len += scnprintf(buf + len, buf_len - len, "0.trigger MAC error\n");
+	len += scnprintf(buf + len, buf_len - len, "1.trigger DMA CH0 TX error\n");
+	len += scnprintf(buf + len, buf_len - len, "2.trigger DMA CH0 RX error\n");
+	len += scnprintf(buf + len, buf_len - len, "3.trigger DMA CH1 TX error\n");
+	len += scnprintf(buf + len, buf_len - len, "4.trigger DMA CH2 RX error\n");
+	len += scnprintf(buf + len, buf_len - len, "5.halt all errors\n");
+
+	if (len > buf_len)
+		len = buf_len;
+
+	ETHQOSDBG("%s", buf);
+	memcpy(user_buf, buf, len);
+	kfree(buf);
+	return len;
+}
+
+static DEVICE_ATTR(status, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_status, NULL);
+
+static DEVICE_ATTR(stats, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_stats, NULL);
 
 static ssize_t ethqos_store_health_recovery(struct device *dev,
 			struct device_attribute *attr, const char *user_buf, size_t size)
 {
-	return 0;
+	char *in_buf;
+	int direction = -1;
+	int ret = 0;
+	struct device *parent;
+	struct qcom_ethqos *ethqos;
+	struct net_device *netdev;
+	struct stmmac_priv *priv;
+	u32 channel = 0;
+	enum direction dir;
+	bool use_l3_l4_filters;
+	bool ipa_offload_suspended;
+
+	in_buf = kstrdup(user_buf, GFP_KERNEL);
+	if (!in_buf) {
+		ETHQOSERR("Failed to allocate memory\n");
+		return -ENOMEM;
+	}
+
+	parent = kobj_to_dev(dev->kobj.parent);
+	if (!parent) {
+		ETHQOSERR("parent is NULL\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	netdev = to_net_dev(parent);
+	if (!netdev) {
+		ETHQOSERR("netdev is NULL\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	priv = netdev_priv(netdev);
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	ethqos = (struct qcom_ethqos *)priv->plat->bsp_priv;
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	if (!netif_running(netdev)) {
+		ETHQOSERR("netif is not running\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	if (!netif_carrier_ok(netdev)) {
+		ETHQOSERR("phy link down\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	ret = kstrtoint(in_buf, 0, &direction);
+	if (ret) {
+		ETHQOSERR("Error in reading option from user\n");
+		goto free_buf;
+	}
+
+	switch (direction) {
+	case DIRECTION_TX:
+		dir = DIRECTION_TX;
+		channel = TX_SW_CHANNEL_NUMBER;
+
+		stmmac_perform_health_recovery(priv, channel, dir);
+
+		ret = ethqos_reset_dma_channel_stats(ethqos, channel, DIRECTION_TX, priv);
+		if (ret) {
+			ETHQOSERR("Failed to reset TX DMA stats: %d\n", ret);
+			goto free_buf;
+		}
+
+		ethqos->hm_counters->sw_tx_path_recovery_count++;
+		break;
+
+	case DIRECTION_RX:
+		dir = DIRECTION_RX;
+
+		use_l3_l4_filters = (priv->num_l3_l4_filters > 0);
+
+		ipa_offload_suspended = ethqos_is_be_ipa_offload_suspended();
+
+		if (ethqos->sw_rx_unfiltered_ch_status && ipa_offload_suspended) {
+			channel = RX_SW_UNFILTERED_CHANNEL_NUMBER;
+			stmmac_perform_health_recovery(priv, channel, dir);
+
+			ret = ethqos_reset_dma_channel_stats(ethqos, channel, DIRECTION_RX, priv);
+			if (ret) {
+				ETHQOSERR("Failed to reset unfiltered RX DMA stats: %d\n", ret);
+				goto free_buf;
+			}
+		}
+
+		if (ethqos->sw_rx_filtered_ch_status && use_l3_l4_filters) {
+			channel = RX_SW_FILTERED_CHANNEL_NUMBER;
+			stmmac_perform_health_recovery(priv, channel, dir);
+
+			ret = ethqos_reset_dma_channel_stats(ethqos, channel, DIRECTION_RX, priv);
+			if (ret) {
+				ETHQOSERR("Failed to reset filtered RX DMA stats: %d\n", ret);
+				goto free_buf;
+			}
+		}
+
+		ethqos->hm_counters->sw_rx_path_recovery_count++;
+		break;
+
+	case HW_RESET_RECOVERY:
+		ret = ethqos_mac_recovery(ethqos, priv);
+		if (ret) {
+			ETHQOSERR("MAC recovery failed: %d\n", ret);
+			goto free_buf;
+		}
+		break;
+
+	default:
+		ETHQOSERR("Invalid direction: %d\n", direction);
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	kfree(in_buf);
+	return size;
+
+free_buf:
+	kfree(in_buf);
+	return ret;
 }
 
 static DEVICE_ATTR(recovery, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_recovery,
 			ethqos_store_health_recovery);
 
-static ssize_t ethqos_show_health_trigger_stall(struct device *dev,
-			struct device_attribute *attr, char *user_buf)
-{
-	return 0;
-}
-
-static ssize_t ethqos_store_health_trigger_stall(struct device *dev, struct device_attribute *attr,
+static ssize_t ethqos_store_health_trigger_stall(struct device *dev,
+				struct device_attribute *attr,
 				const char *user_buf, size_t size)
 {
-	return 0;
+	char *in_buf;
+	int error_type = -1;
+	int ret = 0;
+	struct device *parent;
+	struct net_device *netdev;
+	struct stmmac_priv *priv;
+	struct qcom_ethqos *ethqos;
+	u32 dma_channel = 0;
+
+	in_buf = kstrdup(user_buf, GFP_KERNEL);
+	if (!in_buf) {
+		ETHQOSERR("Failed to allocate memory\n");
+		return -ENOMEM;
+	}
+
+	parent = kobj_to_dev(dev->kobj.parent);
+	if (!parent) {
+		ETHQOSERR("parent is NULL\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	netdev = to_net_dev(parent);
+	if (!netdev) {
+		ETHQOSERR("netdev is NULL\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	priv = netdev_priv(netdev);
+	if (!priv) {
+		ETHQOSERR("priv is NULL\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	ethqos = (struct qcom_ethqos *)priv->plat->bsp_priv;
+	if (!ethqos) {
+		ETHQOSERR("ethqos is NULL\n");
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	ret = kstrtoint(in_buf, 0, &error_type);
+	if (ret) {
+		ETHQOSERR("Error in reading option from user\n");
+		goto free_buf;
+	}
+
+	if (error_type < TRIGGER_MAC_ERROR || error_type > TRIGGER_HALT_ERRORS) {
+		ETHQOSERR("Invalid error type: %d\n", error_type);
+		ret = -EINVAL;
+		goto free_buf;
+	}
+
+	ethqos->last_triggered_error = error_type;
+
+	switch (error_type) {
+	case TRIGGER_MAC_ERROR:
+		ret = ethqos_trigger_mac_error(ethqos);
+		if (ret) {
+			ETHQOSERR("Failed to trigger MAC error: %d\n", ret);
+			goto free_buf;
+		}
+		break;
+
+	case TRIGGER_DMA_CH0_TX_ERROR:
+		dma_channel = MAC_DMA_CH0_TX_CONTROL;
+		break;
+
+	case TRIGGER_DMA_CH0_RX_ERROR:
+		dma_channel = MAC_DMA_CH0_RX_CONTROL;
+		break;
+
+	case TRIGGER_DMA_CH1_TX_ERROR:
+		dma_channel = MAC_DMA_CH1_TX_CONTROL;
+		break;
+
+	case TRIGGER_DMA_CH2_RX_ERROR:
+		dma_channel = MAC_DMA_CH2_RX_CONTROL;
+		break;
+
+	case TRIGGER_HALT_ERRORS:
+		ethqos->trigger_mac_error_flag = false;
+		ret = ethqos_mac_recovery(ethqos, priv);
+		if (ret) {
+			ETHQOSERR("MAC recovery failed: %d\n", ret);
+			goto free_buf;
+		}
+		break;
+	}
+
+	if (error_type > TRIGGER_HM_ERROR_MIN && error_type < TRIGGER_HM_ERROR_MAX) {
+		if (error_type == TRIGGER_DMA_CH0_TX_ERROR) {
+			ret = ethqos_disable_dma_channel(ethqos, MAC_DMA_CH0_INTERRUPT_ENABLE);
+			if (ret) {
+				ETHQOSERR("Failed to disable DMA CH0 Tx IRQ: %d\n", ret);
+				goto free_buf;
+			}
+		}
+
+		ret = ethqos_disable_dma_channel(ethqos, dma_channel);
+		if (ret) {
+			ETHQOSERR("Failed to trigger DMA error for type %d: %d\n", 
+				error_type, ret);
+			goto free_buf;
+		}
+	}
+
+	kfree(in_buf);
+	return size;
+
+free_buf:
+	kfree(in_buf);
+	return ret;
 }
 
 static DEVICE_ATTR(trigger_stall, ETHQOS_HM_SYSFS_DEV_ATTR_PERMS, ethqos_show_health_trigger_stall,
-		ethqos_store_health_trigger_stall);
+			ethqos_store_health_trigger_stall);
 
 static int ethqos_create_healthmonitor_sysfs(struct qcom_ethqos *ethqos)
 {
@@ -4509,7 +5835,7 @@ static int ethqos_create_healthmonitor_sysfs(struct qcom_ethqos *ethqos)
 	int ret;
 
 	if (!ethqos) {
-		ETHQOSERR("Null Param %s\n", __func__);
+		ETHQOSERR("ethqos is NULL %s\n", __func__);
 		return -EINVAL;
 	}
 	netdev = platform_get_drvdata(ethqos->pdev);
@@ -5168,7 +6494,10 @@ ethqos_emac_mem_base(ethqos);
 	place_marker("M - Ethernet probe end");
 #endif
 
-	ethqos_initialize_healthmonitor(ethqos);
+	ret = ethqos_initialize_healthmonitor(ethqos);
+	if (ret) {
+		ETHQOSERR("Failed to initialize health_monitor\n");
+	}
 
 #ifdef CONFIG_NET_L3_MASTER_DEV
 	if (ethqos->early_eth_enabled &&

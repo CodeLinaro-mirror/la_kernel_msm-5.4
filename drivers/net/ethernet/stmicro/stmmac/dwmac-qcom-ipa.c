@@ -3616,3 +3616,7 @@ void ethqos_ipa_offload_event_handler(void *data,
 	IPA_UNLOCK();
 }
 
+bool ethqos_is_be_ipa_offload_suspended(void)
+{
+	return eth_ipa_ctx.ipa_offload_susp[IPA_QUEUE_BE] ? true : false;
+}
