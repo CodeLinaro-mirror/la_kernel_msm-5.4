@@ -1329,23 +1329,26 @@ static int prepare_send_scm_msg(const uint8_t *in_buf, phys_addr_t in_paddr,
 			 */
 			if (smc_clock_support) {
 				ret_smc_clk = qseecom_set_msm_bus_request_from_smcinvoke(HIGH);
-				if (ret_smc_clk) {
+				if (ret_smc_clk && (ret_smc_clk != QSEE_CLK_ALREADY_ACTIVE)) {
 					pr_err("Clock enablement failed, ret: %d\n",
 							ret_smc_clk);
 					ret = -EPERM;
 					break;
 				}
 			}
+
 			ret = invoke_cmd_handler(cmd, in_paddr, in_buf_len, out_buf,
 				out_paddr, out_buf_len, &req->result, &response_type,
 				&data, in_shm, out_shm);
 			if (smc_clock_support) {
-				ret_smc_clk = qseecom_set_msm_bus_request_from_smcinvoke(INACTIVE);
-				if (ret_smc_clk) {
-					pr_err("Clock enablement failed, ret: %d\n",
-							ret_smc_clk);
-					ret = -EPERM;
-					break;
+				if (ret_smc_clk != QSEE_CLK_ALREADY_ACTIVE) {
+					ret_smc_clk = qseecom_set_msm_bus_request_from_smcinvoke(INACTIVE);
+					if (ret_smc_clk) {
+						pr_err("Clock enablement failed, ret: %d\n",
+								ret_smc_clk);
+						ret = -EPERM;
+						break;
+					}
 				}
 			}
 
