@@ -271,6 +271,8 @@ struct stmmac_dma_ops {
 	stmmac_do_void_callback(__priv, dma, set_bfsize, __args)
 #define stmmac_enable_sph(__priv, __args...) \
 	stmmac_do_void_callback(__priv, dma, enable_sph, __args)
+#define stmmac_flush_tx_mtl(__priv, __args...) \
+	stmmac_do_void_callback(__priv, mac, flush_tx_mtl, __args)
 
 struct mac_device_info;
 struct net_device;
@@ -379,6 +381,7 @@ struct stmmac_ops {
 	void (*set_arp_offload)(struct mac_device_info *hw, bool en, u32 addr);
 		/* Enable the VLAN MAC configuration for DMA Queue*/
 	void (*qcom_set_vlan)(struct vlan_filter_info *vlan, void __iomem *ioaddr);
+	void (*flush_tx_mtl)(struct mac_device_info *hw, u32 chan);
 };
 
 #define stmmac_core_init(__priv, __args...) \

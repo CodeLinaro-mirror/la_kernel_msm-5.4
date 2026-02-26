@@ -274,6 +274,11 @@ enum stmmac_state {
 	STMMAC_SERVICE_SCHED,
 };
 
+enum direction {
+    DIRECTION_TX,
+    DIRECTION_RX
+};
+
 #define GET_MEM_PDEV_DEV (priv->plat->stmmac_emb_smmu_ctx.valid ? \
 			&priv->plat->stmmac_emb_smmu_ctx.smmu_pdev->dev : priv->device)
 
@@ -299,6 +304,12 @@ bool qcom_ethqos_ipa_enabled(void);
 u16 icmp_fast_csum(u16 old_csum);
 void swap_ip_port(struct sk_buff *skb, unsigned int eth_type);
 unsigned int dwmac_qcom_get_eth_type(unsigned char *buf);
+
+void stmmac_reset_subtask(struct stmmac_priv *priv);
+void stmmac_stop_all_dma(struct stmmac_priv *priv);
+void stmmac_flush_all_mtl_tx(struct stmmac_priv *priv);
+
+void stmmac_perform_health_recovery(struct stmmac_priv *priv, u32 channel, enum direction dir);
 
 #if IS_ENABLED(CONFIG_STMMAC_SELFTESTS)
 void stmmac_selftest_run(struct net_device *dev,

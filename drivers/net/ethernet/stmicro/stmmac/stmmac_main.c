@@ -2072,13 +2072,22 @@ static void stmmac_start_all_dma(struct stmmac_priv *priv)
 	}
 }
 
+void stmmac_flush_all_mtl_tx(struct stmmac_priv *priv)
+{
+	u32 tx_channels_count = priv->plat->tx_queues_to_use;
+	u32 chan = 0;
+
+	for (chan = 0; chan < tx_channels_count; chan++)
+		stmmac_flush_tx_mtl(priv, priv->hw, chan);
+}
+
 /**
  * stmmac_stop_all_dma - stop all RX and TX DMA channels
  * @priv: driver private structure
  * Description:
  * This stops the RX and TX DMA channels
  */
-static void stmmac_stop_all_dma(struct stmmac_priv *priv)
+void stmmac_stop_all_dma(struct stmmac_priv *priv)
 {
 	u32 rx_channels_count = priv->plat->rx_queues_to_use;
 	u32 tx_channels_count = priv->plat->tx_queues_to_use;
@@ -3630,6 +3639,7 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct ethhdr *eth_header = NULL;
 	unsigned short eth_type = 0;
 
+	priv->xstats.tx_pkt_nw_stack++;
 	tx_q = &priv->tx_queue[queue];
 
 	if (priv->tx_path_in_lpi_mode)
@@ -5150,7 +5160,7 @@ static const struct net_device_ops stmmac_netdev_ops = {
 	.ndo_select_queue = stmmac_tx_select_queue,
 };
 
-static void stmmac_reset_subtask(struct stmmac_priv *priv)
+void stmmac_reset_subtask(struct stmmac_priv *priv)
 {
 	if (!test_and_clear_bit(STMMAC_RESET_REQUESTED, &priv->state))
 		return;
@@ -5803,6 +5813,155 @@ int stmmac_resume(struct device *dev)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(stmmac_resume);
+
+static void stmmac_reinit_rx_buffer(struct stmmac_priv *priv, int channel)
+{
+	int i;
+	struct stmmac_rx_queue *rx_q = &priv->rx_queue[channel];
+
+	for (i = 0; i < DMA_RX_SIZE; i++) {
+		struct stmmac_rx_buffer *buf = &rx_q->buf_pool[i];
+
+		if (buf->page) {
+			page_pool_recycle_direct(rx_q->page_pool, buf->page);
+			buf->page = NULL;
+		}
+
+		if (priv->sph && buf->sec_page) {
+			page_pool_recycle_direct(rx_q->page_pool, buf->sec_page);
+			buf->sec_page = NULL;
+		}
+	}
+
+	for (i = 0; i < DMA_RX_SIZE; i++) {
+		struct stmmac_rx_buffer *buf = &rx_q->buf_pool[i];
+		struct dma_desc *p;
+
+		if (priv->extend_desc)
+			p = &((rx_q->dma_erx + i)->basic);
+		else
+			p = rx_q->dma_rx + i;
+
+		if (!buf->page) {
+			buf->page = page_pool_dev_alloc_pages(rx_q->page_pool);
+			if (!buf->page)
+				goto err_reinit_rx_buffer;
+
+			buf->addr = page_pool_get_dma_addr(buf->page);
+			if(!buf->addr) {
+				pr_err("buf->addr is NULL");
+				goto err_reinit_rx_buffer;
+			}
+		}
+
+		if (priv->sph && !buf->sec_page) {
+			buf->sec_page = page_pool_dev_alloc_pages(rx_q->page_pool);
+			if (!buf->sec_page)
+				goto err_reinit_rx_buffer;
+
+			buf->sec_addr = page_pool_get_dma_addr(buf->sec_page);
+			if(!buf->sec_addr) {
+				pr_err("buf->sec_addr is NULL");
+				goto err_reinit_rx_buffer;
+			}
+			stmmac_set_desc_sec_addr(priv, p, buf->sec_addr);
+		}
+
+		stmmac_set_desc_addr(priv, p, buf->addr);
+
+		if (priv->dma_buf_sz == BUF_SIZE_16KiB)
+			stmmac_init_desc3(priv, p);
+	}
+	return;
+
+	err_reinit_rx_buffer:
+	pr_err(" error in reinit_rx_buffer");
+	stmmac_free_rx_buffer(priv, channel, i);
+}
+
+void stmmac_perform_health_recovery(struct stmmac_priv *priv, u32 channel, enum direction dir)
+{
+	int i;
+
+	if (!priv || !priv->dev) {
+		ETHQOSERR("Invalid priv or device pointer\n");
+		return;
+	}
+
+	if (dir == DIRECTION_TX) {
+		if (channel >= priv->plat->tx_queues_to_use || channel < 0) {
+			ETHQOSERR("Invalid TX channel number: %u (valid range: 0-%u)\n",
+				channel, priv->plat->tx_queues_to_use - 1);
+			return;
+		}
+
+		struct stmmac_tx_queue *tx_q = &priv->tx_queue[channel];
+
+		netif_tx_stop_queue(netdev_get_tx_queue(priv->dev, channel));
+		dma_wmb();
+		stmmac_stop_tx_dma(priv, channel);
+		dma_free_tx_skbufs(priv, channel);
+
+		for (i = 0; i < DMA_TX_SIZE; i++) {
+			if (priv->extend_desc)
+				stmmac_init_tx_desc(priv, &tx_q->dma_etx[i].basic,
+					priv->mode, (i == DMA_TX_SIZE - 1));
+			else
+				stmmac_init_tx_desc(priv, &tx_q->dma_tx[i],
+					priv->mode, (i == DMA_TX_SIZE - 1));
+		}
+
+		tx_q->dirty_tx = 0;
+		tx_q->cur_tx = 0;
+		tx_q->mss = 0;
+
+		netdev_tx_reset_queue(netdev_get_tx_queue(priv->dev, channel));
+		stmmac_init_tx_chan(priv, priv->ioaddr, priv->plat->dma_cfg,
+				tx_q->dma_tx_phy, channel);
+		stmmac_start_tx_dma(priv, channel);
+
+		priv->dev->stats.tx_errors++;
+
+		netif_tx_wake_queue(netdev_get_tx_queue(priv->dev, channel));
+
+	} else if (dir == DIRECTION_RX) {
+		if (channel >= priv->plat->rx_queues_to_use || channel < 0) {
+			ETHQOSERR("Invalid RX channel number: %u (valid range: 0-%u)\n",
+				channel, priv->plat->rx_queues_to_use - 1);
+			return;
+		}
+
+		struct stmmac_rx_queue *rx_q = &priv->rx_queue[channel];
+
+		stmmac_stop_rx_dma(priv, channel);
+
+		for (i = 0; i < DMA_RX_SIZE; i++) {
+			if (priv->extend_desc)
+				stmmac_init_rx_desc(priv, &rx_q->dma_erx[i].basic,
+					priv->use_riwt, priv->mode,
+					(i == DMA_RX_SIZE - 1),
+					priv->dma_buf_sz);
+			else
+				stmmac_init_rx_desc(priv, &rx_q->dma_rx[i],
+				priv->use_riwt, priv->mode,
+				(i == DMA_RX_SIZE - 1),
+				priv->dma_buf_sz);
+		}
+
+		rx_q->cur_rx = 0;
+		rx_q->dirty_rx = 0;
+
+		stmmac_init_rx_chan(priv, priv->ioaddr, priv->plat->dma_cfg,
+				rx_q->dma_rx_phy, channel);
+		stmmac_reinit_rx_buffer(priv, channel);
+
+		stmmac_start_rx_dma(priv, channel);
+
+		priv->dev->stats.rx_errors++;
+	} else {
+		ETHQOSERR("Invalid direction: %d\n", dir);
+	}
+}
 
 #ifndef MODULE
 static int __init stmmac_cmdline_opt(char *str)

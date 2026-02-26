@@ -21,6 +21,7 @@ extern void *ipc_emac_log_ctxt;
 #include <net/ipv6.h>
 #include <net/inet_common.h>
 #include <linux/interconnect.h>
+#include <linux/io.h>
 
 #include <linux/uaccess.h>
 #include <linux/time64.h>
@@ -225,6 +226,66 @@ do  {\
 #define MAC_CONFIGURATION 0x0
 #define MAC_LM BIT(12)
 
+#define MAC_RE	BIT(0)
+#define MAC_TE	BIT(1)
+
+#define MAC_DMA_CH0_TX_CONTROL	0x1104
+#define MAC_DMA_CH1_TX_CONTROL	0x1184
+#define MAC_DMA_CH0_RX_CONTROL	0x1108
+#define MAC_DMA_CH1_RX_CONTROL	0x1188
+#define MAC_DMA_CH2_RX_CONTROL	0x1208
+#define MAC_CH_START	BIT(0)
+
+#define MAC_DMA_CH0_INTERRUPT_ENABLE	0x1134
+
+#define MMC_TX_OCTETCOUNT_GB	0x14
+#define MMC_RX_OCTETCOUNT_GB	0x84
+#define MMC_RX_FIFO_OVERFLOW	0xd4
+#define MMC_RX_CRC_ERROR	0x94
+#define MMC_RX_JABBER_ERROR	0xA0
+#define MMC_RX_LENGTH_ERROR	0xc8
+#define MMC_RX_WATCHDOG_ERROR	0xdc
+#define MMC_RX_ALIGN_ERROR	0x98
+#define MMC_RX_RUN_ERROR	0x9C
+#define EMAC_DMA_DEBUG_STATUS0	0x100C
+#define DMA_DESCRIPTOR_SIZE	0x10
+
+// DMA Debug Status Register bit field macros
+#define DMA_DEBUG_STATUS0_RX_STATE_POS_CH0	8
+#define DMA_DEBUG_STATUS0_RX_STATE_MASK_CH0	0x0F
+#define DMA_DEBUG_STATUS0_RX_STATE_POS_CH1	16
+#define DMA_DEBUG_STATUS0_RX_STATE_MASK_CH1	0x0F
+#define DMA_DEBUG_STATUS0_RX_STATE_POS_CH2	24
+#define DMA_DEBUG_STATUS0_RX_STATE_MASK_CH2	0x0F
+
+// DMA RX State values
+#define DMA_RX_STATE_IDLE	0x0
+#define DMA_RX_STATE_SUSPENDED	0x4
+
+#define TRIGGER_HM_ERROR_MIN	0
+#define TRIGGER_HM_ERROR_MAX	5
+
+#define EMAC_QUEUE_0	0
+#define EMAC_CHANNEL_0	0
+#define EMAC_CHANNEL_1	1
+
+#define INVALID_ERROR	-1
+#define TRIGGER_MAC_ERROR	0
+#define TRIGGER_DMA_CH0_TX_ERROR	1
+#define TRIGGER_DMA_CH0_RX_ERROR	2
+#define TRIGGER_DMA_CH1_TX_ERROR	3
+#define TRIGGER_DMA_CH2_RX_ERROR	4
+#define TRIGGER_HALT_ERRORS	5
+
+#define DMA_CH0	0
+#define DMA_CH1	1
+#define DMA_CH2	2
+
+#define HW_RESET_RECOVERY	2
+#define NDO_OPEN	3
+
+#define EMAC_RGMII_ARES_SHIFT	2
+#define EMAC_RGMII_ARES_MASK	(1U << EMAC_RGMII_ARES_SHIFT)
 
 #define DMA_CH0 0
 #define DMA_CH1 1
@@ -742,6 +803,17 @@ do  {\
 #define QSERDES_PCS2_RX_LANE1_0_STATUS (QSERDES_PCS_2 + 0x2C)
 #define QSERDES_PCS2_RX_LANE1_1_STATUS (QSERDES_PCS_2 + 0x30)
 #define QSERDES_PCS2_RX_LANE1_3_STATUS (QSERDES_PCS_2 + 0x34)
+
+#define STATUS_MAC_HW_STALLED    (1 << 0)
+#define STATUS_HW_PATH_STALLED   (1 << 1)
+#define STATUS_SW_TX_STALLED     (1 << 2)
+#define STATUS_SW_RX_STALLED     (1 << 3)
+
+#define TX_HW_CHANNEL_NUMBER	0
+#define TX_SW_CHANNEL_NUMBER	1
+#define RX_HW_CHANNEL_NUMBER	0
+#define RX_SW_UNFILTERED_CHANNEL_NUMBER	1	/* Packets NOT matching filters */
+#define RX_SW_FILTERED_CHANNEL_NUMBER	2	/* Packets matching L3/L4 filters */
 
 static inline u32 PPSCMDX(u32 x, u32 val)
 {

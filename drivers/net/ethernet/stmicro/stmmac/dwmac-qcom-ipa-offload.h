@@ -77,4 +77,6 @@ static inline void ethqos_ipa_offload_event_handler(void *data, int ev)
 #define EV_CACHE_RESUME (EV_CACHE_SUSPEND + 1)
 #define EV_IPA_OFFLOAD_MAX (EV_CACHE_RESUME + 1)
 
+bool ethqos_is_be_ipa_offload_suspended(void);
+
 #endif
