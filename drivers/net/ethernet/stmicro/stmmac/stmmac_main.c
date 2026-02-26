@@ -3293,6 +3293,7 @@ static int stmmac_release(struct net_device *dev)
 
 	stmmac_release_ptp(priv);
 
+	priv->num_l3_l4_filters = 0;
 	return 0;
 }
 
