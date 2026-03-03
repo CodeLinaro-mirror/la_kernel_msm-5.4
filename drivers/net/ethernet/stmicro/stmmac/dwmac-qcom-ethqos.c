@@ -5220,6 +5220,7 @@ static int ethqos_mac_recovery(struct qcom_ethqos *ethqos, struct stmmac_priv *p
 
 unlock:
 	rtnl_unlock();
+	priv->plat->mac2mac_en = false;
 
 	if (!ret) {
 		// Reset counters and clear error flag
