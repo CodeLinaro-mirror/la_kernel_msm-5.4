@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2015, Sony Mobile Communications Inc.
  * Copyright (c) 2013, 2018-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #include <linux/kthread.h>
 #include <linux/module.h>
@@ -1244,25 +1244,25 @@ static void qrtr_node_rx_work(struct kthread_work *work)
 static void qrtr_cleanup_flow_control(struct qrtr_node *node,
 				      struct sk_buff *skb)
 {
-	struct qrtr_ctrl_pkt *pkt;
+	struct qrtr_ctrl_pkt pkt = {0,};
 	unsigned long key;
 	void __rcu **slot;
+	struct qrtr_cb *cb;
 	struct sockaddr_qrtr src;
 	struct qrtr_tx_flow *flow;
 	struct radix_tree_iter iter;
 	struct qrtr_tx_flow_waiter *waiter;
 	struct qrtr_tx_flow_waiter *temp;
-	u32 cmd;
 
-	pkt = (void *)skb->data;
-	cmd = le32_to_cpu(pkt->cmd);
+	cb = (struct qrtr_cb *)skb->cb;
+	skb_copy_bits(skb, 0, &pkt, sizeof(pkt));
 
-	if (cmd == QRTR_TYPE_DEL_SERVER) {
-		src.sq_node = le32_to_cpu(pkt->server.node);
-		src.sq_port = le32_to_cpu(pkt->server.port);
+	if (cb->type == QRTR_TYPE_DEL_SERVER) {
+		src.sq_node = le32_to_cpu(pkt.server.node);
+		src.sq_port = le32_to_cpu(pkt.server.port);
 	} else {
-		src.sq_node = le32_to_cpu(pkt->client.node);
-		src.sq_port = le32_to_cpu(pkt->client.port);
+		src.sq_node = le32_to_cpu(pkt.client.node);
+		src.sq_port = le32_to_cpu(pkt.client.port);
 	}
 
 	key = (u64)src.sq_node << 32 | src.sq_port;
