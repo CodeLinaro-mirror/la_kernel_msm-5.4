@@ -8,6 +8,8 @@
 
   Author: Carl Shaw <carl.shaw@st.com>
   Maintainer: Giuseppe Cavallaro <peppe.cavallaro@st.com>
+
+  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 *******************************************************************************/
 
 #include <linux/gpio/consumer.h>
@@ -162,6 +164,9 @@ static int stmmac_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 	int data = 0;
 	u32 v;
 
+	if (priv->plat->clks_suspended)
+		return -EBUSY;
+
 	value |= (phyaddr << priv->hw->mii.addr_shift)
 		& priv->hw->mii.addr_mask;
 	value |= (phyreg << priv->hw->mii.reg_shift) & priv->hw->mii.reg_mask;
@@ -217,6 +222,8 @@ static int stmmac_mdio_write(struct mii_bus *bus, int phyaddr, int phyreg,
 	int data = phydata;
 	u32 v;
 
+	if (priv->plat->clks_suspended)
+		return -EBUSY;
 	value |= (phyaddr << priv->hw->mii.addr_shift)
 		& priv->hw->mii.addr_mask;
 	value |= (phyreg << priv->hw->mii.reg_shift) & priv->hw->mii.reg_mask;
