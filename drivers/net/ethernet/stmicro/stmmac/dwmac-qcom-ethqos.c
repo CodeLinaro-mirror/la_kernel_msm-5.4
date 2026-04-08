@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2018-19 Linaro Limited
 /* Copyright (c) 2021, The Linux Foundation. All rights reserved. */
-/*Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.*/
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. */
 
 #include <linux/delay.h>
 #include <linux/module.h>
@@ -611,6 +611,7 @@ static int ethqos_handle_prv_ioctl_filter_ipv6(struct net_device *dev,
 unsigned int dwmac_qcom_get_plat_tx_coal_frames(struct sk_buff *skb)
 {
 	unsigned int eth_type;
+	struct iphdr *ip_header = ip_hdr(skb);
 
 	eth_type = dwmac_qcom_get_eth_type(skb->data);
 
@@ -622,6 +623,8 @@ unsigned int dwmac_qcom_get_plat_tx_coal_frames(struct sk_buff *skb)
 	if (eth_type == ETH_P_TSN)
 		return AVB_INT_MOD;
 	if (eth_type == ETH_P_IP || eth_type == ETH_P_IPV6) {
+		if (ip_header->protocol == IPPROTO_ICMP)
+			return ICMP_INT_MOD;
 #ifdef CONFIG_PTPSUPPORT_OBJ
 		bool is_udp = (((eth_type == ETH_P_IP) &&
 				   (ip_hdr(skb)->protocol ==

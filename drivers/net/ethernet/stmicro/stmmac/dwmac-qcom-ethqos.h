@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (c) 2021, The Linux Foundation. All rights reserved.
  */
-/*Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.*/
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries. */
 #ifndef	_DWMAC_QCOM_ETHQOS_H
 #define	_DWMAC_QCOM_ETHQOS_H
 
@@ -1182,6 +1182,7 @@ u16 dwmac_qcom_select_queue(struct net_device *dev,
 #define AVB_INT_MOD 8
 #define IP_PKT_INT_MOD 32
 #define PTP_INT_MOD 1
+#define ICMP_INT_MOD 1
 
 #define PPS_19_2_FREQ 19200000
 
