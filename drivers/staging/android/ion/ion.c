@@ -26,6 +26,8 @@
 #include <linux/uaccess.h>
 
 #include "ion_private.h"
+#include <soc/qcom/secure_buffer.h>
+#include "heaps/ion_secure_util.h"
 
 #define ION_CURRENT_ABI_VERSION  2
 
@@ -139,10 +141,100 @@ out:
 	return ret;
 }
 
+static bool ion_valid_vmid(int vmid)
+{
+	return (vmid >= VMID_HLOS && vmid<VMID_LAST);
+}
+
+static bool ion_valid_perm(int perm)
+{
+	return (perm <= (PERM_READ | PERM_WRITE | PERM_EXEC));
+}
+
+static int ion_hyp_assign(struct ion_hyp_assign_data *data){
+	struct dma_buf *dmabuf;
+	struct ion_buffer *buffer;
+	int ret = 0;
+	struct scatterlist *sg;
+	int i = 0;
+
+	if (data->reserved[0] || data->reserved[1] ||
+		data->reserved[2] || data->reserved[3]) {
+		ret = -EINVAL;
+		return ret;
+	}
+	if ( !ion_valid_vmid((int)data->src_vmid) ||
+		!ion_valid_vmid((int)data->dst_vmid) ||
+		!ion_valid_perm((int)data->dst_perm)) {
+		ret = -EINVAL;
+		return ret;
+	}
+
+	dmabuf = dma_buf_get(data->buf_fd);
+	if (IS_ERR(dmabuf)) {
+		ret = PTR_ERR(dmabuf);
+		return ret;
+	}
+
+
+	buffer = dmabuf->priv;
+	mutex_lock(&buffer->lock);
+	{
+		int src_vmids[1] = { (int)data->src_vmid };
+		int dst_vmids[1] = { (int)data->dst_vmid };
+		int dst_perms[1] = { (int)data->dst_perm };
+		int direction = { (int)data->direction };
+
+		if (buffer->kmap_cnt > 0) {
+		    pr_err("%s: buffer still kmapped, cannot hyp_assign\n",
+			   __func__);
+		    ret = -EBUSY;
+		    goto out;
+		}
+		if(direction == ION_HYP_ASSIGN_TO_VM) {
+			ret = hyp_assign_table(buffer->sg_table,
+					       src_vmids, 1,
+					       dst_vmids, dst_perms, 1);
+			if(ret == 0) {
+				buffer->flags |= ION_FLAG_ION_LEND_BUF;
+				for_each_sg(buffer->sg_table->sgl, sg, buffer->sg_table->nents, i)
+					SetPagePrivate(sg_page(sg));
+			}
+		} else if(direction == ION_HYP_ASSIGN_FROM_VM) {
+			u32 hlos_perms = PERM_READ | PERM_WRITE | PERM_EXEC;
+			ret = hyp_assign_table(buffer->sg_table,
+					       src_vmids, 1,
+					       dst_vmids, &hlos_perms, 1);
+			if(ret == 0) {
+				buffer->flags &= ~ION_FLAG_ION_LEND_BUF;
+				for_each_sg(buffer->sg_table->sgl, sg, buffer->sg_table->nents, i)
+					ClearPagePrivate(sg_page(sg));
+			}
+		} else {
+			pr_err("%s: direction:%d is invalid.\n", __func__, direction);
+			ret = -EINVAL;
+		}
+
+		if (ret) {
+		    pr_err("%s: hyp_assign_table failed: src=%u dst=%u ret=%d\n",
+			   __func__,
+			   data->src_vmid, data->dst_vmid,
+			   ret);
+		}
+	}
+
+out:
+	mutex_unlock(&buffer->lock);
+	dma_buf_put(dmabuf);
+	return ret;
+}
+
+
 union ion_ioctl_arg {
 	struct ion_allocation_data allocation;
 	struct ion_heap_query query;
 	u32 ion_abi_version;
+	struct ion_hyp_assign_data hyp_assign;
 };
 
 static int validate_ioctl_arg(unsigned int cmd, union ion_ioctl_arg *arg)
@@ -206,6 +298,11 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 	case ION_IOC_ABI_VERSION:
 		data.ion_abi_version = ION_CURRENT_ABI_VERSION;
+		break;
+	case ION_IOC_HYP_ASSIGN:
+		ret = ion_hyp_assign(&data.hyp_assign);
+		if (ret!=0)
+			pr_err("%s, ION_IOC_HYP_ASSIGN failed!!!", __func__);
 		break;
 	default:
 		return -ENOTTY;
