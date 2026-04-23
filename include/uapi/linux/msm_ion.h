@@ -7,6 +7,8 @@
 
 #include <linux/types.h>
 #include <linux/msm_ion_ids.h>
+#include <linux/ion.h>
+
 
 /**
  * TARGET_ION_ABI_VERSION can be used by user space clients to ensure that at
@@ -65,6 +67,35 @@ enum msm_ion_heap_types {
  * to come from the page allocator directly instead of from the pool allocation
  */
 #define ION_FLAG_POOL_FORCE_ALLOC	ION_BIT(16)
+
+/**
+ * add lenbuf stuff
+ */
+#define ION_IOC_HYP_ASSIGN   _IOWR('I', 0x13, struct ion_hyp_assign_data)
+#define ION_VMID_HLOS           0x3 /*VMID_HLOS*/
+#define ION_VMID_CP_BITSTREAM   0x9 /*VMID_CP_BITSTREAM*/
+#define ION_FLAG_ION_LEND_BUF   	ION_BIT(13)
+#define ION_PERM_READ    0x4 /* PERM_READ */
+#define ION_PERM_WRITE   0x2 /* PERM_WRITE */
+#define ION_PERM_EXEC    0x1 /* PERM_EXEC */
+#define ION_HYP_ASSIGN_TO_VM    0   /* HLOS → target VMID (Lend) */
+#define ION_HYP_ASSIGN_FROM_VM  1   /* target VMID → HLOS (Reclaim) */
+/**
+ * struct ion_hyp_assign_data - hyp_assign ioctl parameters
+ * @buf_fd:       operated dma-buf fd
+ * @src_vmid:     source VMID（like: ION_VMID_HLOS）
+ * @dst_vmid:     target VMID（like: ION_VMID_CP_PIXEL）
+ * @dst_perm:     permission（ION_PERM_READ | ION_PERM_WRITE）
+ * @direction:    ION_HYP_ASSIGN_TO_VM or ION_HYP_ASSIGN_FROM_VM
+ */
+struct ion_hyp_assign_data {
+    __s32  buf_fd;
+    __u32  src_vmid;
+    __u32  dst_vmid;
+    __u32  dst_perm;
+    __u32  direction;
+    __u32  reserved[4];   /* reserved, must be 0 */
+};
 
 /**
  * Macro should be used with ion_heap_ids defined above.
