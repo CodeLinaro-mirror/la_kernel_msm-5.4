@@ -1277,6 +1277,7 @@ struct ip_params {
 	char ipv6_addr_str[48];
 	struct in6_ifreq ipv6_addr;
 	bool is_valid_ipv6_addr;
+	bool is_debug_hm_enabled;
 };
 
 int ethqos_init_regulators(struct qcom_ethqos *ethqos);
