@@ -761,6 +761,23 @@ fail:
 }
 
 __setup("ermac=", set_early_ethernet_mac);
+
+static int __init set_early_ethernet_debug_hm(char *debug_hm_in)
+{
+	pparams.is_debug_hm_enabled = false;
+
+	if (!debug_hm_in)
+		return 1;
+
+	if (*debug_hm_in == '1') {
+		pparams.is_debug_hm_enabled = true;
+		ETHQOSDBG("debug_hm enabled\n");
+	}
+
+	return 1;
+}
+
+__setup("edbghm=", set_early_ethernet_debug_hm);
 #endif
 
 static int qcom_ethqos_add_ipaddr(struct ip_params *ip_info,
@@ -5952,12 +5969,15 @@ static int ethqos_create_healthmonitor_sysfs(struct qcom_ethqos *ethqos)
 		goto fail;
 	}
 
-	ret = sysfs_create_file(ethqos->hm_sysfs_kobj,
-				&dev_attr_trigger_stall.attr);
-	if (ret) {
-		ETHQOSERR("unable to create trigger_stall hm_sysfs node\n");
-		goto fail;
+	if (pparams.is_debug_hm_enabled) {
+		ret = sysfs_create_file(ethqos->hm_sysfs_kobj,
+					&dev_attr_trigger_stall.attr);
+		if (ret) {
+			ETHQOSERR("unable to create trigger_stall hm_sysfs node\n");
+			goto fail;
+		}
 	}
+
 	return 0;
 
 fail:
