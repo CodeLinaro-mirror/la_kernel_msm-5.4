@@ -13,9 +13,9 @@
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
 
-#define SGM3804_REG_POSITIVE_VOLT       0x00
-#define SGM3804_REG_NEGATIVE_VOLT       0x01
-#define SGM3804_REG_CONTROL             0x03
+#define SGM3804_REG_POSITIVE_VOLT	0x00
+#define SGM3804_REG_NEGATIVE_VOLT	0x01
+#define SGM3804_REG_CONTROL              0x03
 
 #define SGM3804_REG_ADD50_MASK          0x04
 #define SGM3804_REG_ADD50_SHIFT         2
