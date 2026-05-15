@@ -296,7 +296,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		seq_puts(m, preempt_modes[i]);
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -1268,7 +1268,7 @@ static void update_curr(struct cfs_rq *c
+@@ -1269,7 +1269,7 @@ static void update_curr(struct cfs_rq *c
  		return;
  
  	if (resched || did_preempt_short(cfs_rq, curr)) {
@@ -305,7 +305,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		clear_buddies(cfs_rq, curr);
  	}
  }
-@@ -5736,7 +5736,7 @@ entity_tick(struct cfs_rq *cfs_rq, struc
+@@ -5732,7 +5732,7 @@ entity_tick(struct cfs_rq *cfs_rq, struc
  	 * validating it and just reschedule.
  	 */
  	if (queued) {
@@ -314,7 +314,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		return;
  	}
  	/*
-@@ -8952,7 +8952,7 @@ static void check_preempt_wakeup_fair(st
+@@ -8948,7 +8948,7 @@ static void check_preempt_wakeup_fair(st
  	return;
  
  preempt:
