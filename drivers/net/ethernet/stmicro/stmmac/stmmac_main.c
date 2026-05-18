@@ -5686,6 +5686,11 @@ int stmmac_suspend(struct device *dev)
 			priv->plat->clks_suspended = true;
 		}
 	}
+
+	if (priv->plat->mac2mac_en) {
+		netif_carrier_off(ndev);
+	}
+
 	mutex_unlock(&priv->lock);
 
 	priv->speed = SPEED_UNKNOWN;
