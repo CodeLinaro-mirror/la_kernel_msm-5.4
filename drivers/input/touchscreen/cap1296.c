@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/kernel.h>
@@ -341,6 +341,7 @@ static int cap1296_init_chip(struct cap1296_device *cap)
 			dev_err(cap->dev, "Error: cap load default configuration failed\n");
 			return -1;
 		}
+		msleep(10);
 	}
 	cap->init_complete = 1;
 
@@ -511,7 +512,8 @@ static int cap1296_probe(struct i2c_client *client,
 	} else
 		regulator_enable(cap->vddio);
 
-	msleep(200);
+
+        msleep(500);
 	ret = cap1296_init_chip(cap);
 	if (ret < 0) {
 		goto ldo_err;
