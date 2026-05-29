@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+/* Copyright (c) ILI Corporation. and/or its subsidiaries.
  */
 
 /*
