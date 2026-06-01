@@ -172,7 +172,6 @@
 /* enum for writing to TLMM_NORTH_SPARE register as defined by pinctrl API */
 #define TLMM_NORTH_SPARE	2
 #define TLMM_NORTH_SPARE_CORE_IE	BIT(15)
-#define	SDHCI_BOOT_DEVICE	0x0
 
 struct sdhci_msm_offset {
 	u32 core_hc_mode;
@@ -4297,8 +4296,7 @@ static void sdhci_msm_set_caps(struct sdhci_msm_host *msm_host)
 #endif
 }
 
-
-static u32 is_bootdevice_sdhci = SDHCI_BOOT_DEVICE;
+static u32 is_bootdevice_sdhci = true;
 
 static int sdhci_qcom_read_boot_config(struct platform_device *pdev)
 {
@@ -4698,10 +4696,10 @@ pltfm_free:
 
 static int sdhci_msm_remove(struct platform_device *pdev)
 {
-	struct sdhci_host *host = platform_get_drvdata(pdev);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct sdhci_msm_host *msm_host = sdhci_pltfm_priv(pltfm_host);
-	struct sdhci_msm_qos_req *r = msm_host->sdhci_qos;
+	struct sdhci_host *host;
+	struct sdhci_pltfm_host *pltfm_host;
+	struct sdhci_msm_host *msm_host;
+	struct sdhci_msm_qos_req *r;
 	struct qos_cpu_group *qcg;
 	int i;
 	struct device_node *np = pdev->dev.of_node;
@@ -4825,10 +4823,20 @@ skip_clk_gating:
 
 static int sdhci_msm_resume_early(struct device *dev)
 {
-	struct sdhci_host *host = dev_get_drvdata(dev);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct sdhci_msm_host *msm_host = sdhci_pltfm_priv(pltfm_host);
+	struct sdhci_host *host;
+	struct sdhci_pltfm_host *pltfm_host;
+	struct sdhci_msm_host *msm_host;
 	int ret = 0;
+	struct device_node *np = dev->of_node;
+
+	if (of_property_read_bool(np, "non-removable") && !is_bootdevice_sdhci) {
+		dev_info(dev, "SDHCI is not boot dev resume.\n");
+		return 0;
+	}
+
+	host = dev_get_drvdata(dev);
+	pltfm_host = sdhci_priv(host);
+	msm_host = sdhci_pltfm_priv(pltfm_host);
 
 	if (host->mmc->card && mmc_card_sdio(host->mmc->card)) {
 		if (msm_host->is_sdiowakeup_enabled)
@@ -4902,10 +4910,20 @@ static int sdhci_msm_wrapper_suspend_late(struct device *dev)
 
 static int sdhci_msm_suspend_noirq(struct device *dev)
 {
-	struct sdhci_host *host = dev_get_drvdata(dev);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct sdhci_msm_host *msm_host = sdhci_pltfm_priv(pltfm_host);
+	struct sdhci_host *host;
+	struct sdhci_pltfm_host *pltfm_host;
+	struct sdhci_msm_host *msm_host;
 	int ret = 0;
+	struct device_node *np = dev->of_node;
+
+	if (of_property_read_bool(np, "non-removable") && !is_bootdevice_sdhci) {
+		dev_info(dev, "SDHCI is not boot dev.\n");
+		return 0;
+	}
+
+	host = dev_get_drvdata(dev);
+	pltfm_host = sdhci_priv(host);
+	msm_host = sdhci_pltfm_priv(pltfm_host);
 
 	if (host->mmc->card && mmc_card_sdio(host->mmc->card))
 		if (msm_host->sdio_pending_processing)
