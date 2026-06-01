@@ -22,8 +22,8 @@
 #include <linux/of.h>
 #include <linux/reset.h>
 #include <linux/pinctrl/consumer.h>
-#include <linux/nvmem-consumer.h>
 #include <linux/pinctrl/qcom-pinctrl.h>
+#include <linux/nvmem-consumer.h>
 #include <linux/clk/qcom.h>
 
 #include "sdhci-pltfm.h"
@@ -4298,31 +4298,57 @@ static void sdhci_msm_set_caps(struct sdhci_msm_host *msm_host)
 
 static u32 is_bootdevice_sdhci = true;
 
-static int sdhci_qcom_read_boot_config(struct platform_device *pdev)
+static bool sdhci_qcom_read_boot_config(struct platform_device *pdev)
 {
-	u32 *buf;
+	u8 *buf;
 	size_t len;
 	struct nvmem_cell *cell;
+	int boot_device_type, data;
+	struct device *dev = &pdev->dev;
 
-	cell = nvmem_cell_get(&pdev->dev, "boot_conf");
+	cell = nvmem_cell_get(dev, "boot_conf");
 	if (IS_ERR(cell)) {
-		dev_warn(&pdev->dev, "nvmem cell get failed\n");
-		return 0;
+		dev_warn(dev, "nvmem cell get failed\n");
+		goto ret;
 	}
 
-	buf = nvmem_cell_read(cell, &len);
+	buf = (u8 *)nvmem_cell_read(cell, &len);
 	if (IS_ERR(buf)) {
-		dev_warn(&pdev->dev, "nvmem cell read failed\n");
-		nvmem_cell_put(cell);
-		return 0;
+		dev_warn(dev, "nvmem cell read failed\n");
+		goto ret_put_nvmem;
 	}
 
-	is_bootdevice_sdhci = (*buf) >> 1 & 0x1f;
-	dev_info(&pdev->dev, "boot_config val = %x is_bootdevice_sdhci = %x\n",
-			*buf, is_bootdevice_sdhci);
-	kfree(buf);
-	nvmem_cell_put(cell);
+	/*
+	 * Boot_device_type value is passed from the dtsi node
+	 */
+	if (of_property_read_u32(dev->of_node, "boot_device_type",
+				&boot_device_type)) {
+		dev_warn(dev, "boot_device_type not present\n");
+		goto ret_free_buf;
+	}
 
+	/*
+	 * Storage boot device fuse is present in QFPROM_RAW_OEM_CONFIG_ROW0_LSB
+	 * this fuse is blown by bootloader and pupulated in boot_config
+	 * register[1:5] - hence shift read data by 1 and mask it with 0x1f.
+	 */
+	data = *buf >> 1 & 0x1f;
+
+	/*
+	 * The value in the boot_device_type in dtsi node should match with the
+	 * value read from the register for the probe to continue.
+	 */
+	is_bootdevice_sdhci = (data == boot_device_type) ? true : false;
+
+	if (!is_bootdevice_sdhci)
+		dev_err(dev, "boot dev in reg = 0x%x boot dev in dtsi = 0x%x\n",
+				data, boot_device_type);
+
+ret_free_buf:
+	kfree(buf);
+ret_put_nvmem:
+	nvmem_cell_put(cell);
+ret:
 	return is_bootdevice_sdhci;
 }
 
@@ -4343,7 +4369,7 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	struct device_node *node = pdev->dev.of_node;
 	unsigned long flags;
 
-	if (of_property_read_bool(node, "non-removable") && sdhci_qcom_read_boot_config(pdev)) {
+	if (of_property_read_bool(node, "non-removable") && !sdhci_qcom_read_boot_config(pdev)) {
 		dev_err(dev, "SDHCI is not boot dev.\n");
 		return 0;
 	}
@@ -4696,16 +4722,16 @@ pltfm_free:
 
 static int sdhci_msm_remove(struct platform_device *pdev)
 {
-	struct sdhci_host *host;
-	struct sdhci_pltfm_host *pltfm_host;
-	struct sdhci_msm_host *msm_host;
-	struct sdhci_msm_qos_req *r;
+	struct sdhci_host *host = platform_get_drvdata(pdev);
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_msm_host *msm_host = sdhci_pltfm_priv(pltfm_host);
+	struct sdhci_msm_qos_req *r = msm_host->sdhci_qos;
 	struct qos_cpu_group *qcg;
 	int i;
 	struct device_node *np = pdev->dev.of_node;
 	int dead;
 
-	if (of_property_read_bool(np, "non-removable") && is_bootdevice_sdhci) {
+	if (of_property_read_bool(np, "non-removable") && !is_bootdevice_sdhci) {
 		dev_err(&pdev->dev, "SDHCI is not boot dev.\n");
 		return 0;
 	}
@@ -4830,7 +4856,7 @@ static int sdhci_msm_resume_early(struct device *dev)
 	struct device_node *np = dev->of_node;
 
 	if (of_property_read_bool(np, "non-removable") && !is_bootdevice_sdhci) {
-		dev_info(dev, "SDHCI is not boot dev resume.\n");
+		dev_info(dev, "SDHCI is not boot dev.\n");
 		return 0;
 	}
 
@@ -4900,7 +4926,7 @@ static int sdhci_msm_wrapper_suspend_late(struct device *dev)
 {
 	struct device_node *np = dev->of_node;
 
-	if (of_property_read_bool(np, "non-removable") && is_bootdevice_sdhci) {
+	if (of_property_read_bool(np, "non-removable") && !is_bootdevice_sdhci) {
 		dev_info(dev, "SDHCI is not boot dev.\n");
 		return 0;
 	}
