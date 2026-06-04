@@ -4921,10 +4921,10 @@ static enum stall_status ethqos_tx_hw_stall_status(struct health_monitor *old,
 	}
 
 	// Tx HW Path
-	is_tx_hw_tail_ptr_stuck = ethqos_is_dma_pointer_stuck(new->tx_dma_stats[0]->tail_pointer,
-				old->tx_dma_stats[0]->tail_pointer);
-	is_tx_hw_cur_ptr_stuck = ethqos_is_dma_pointer_stuck(new->tx_dma_stats[0]->current_pointer,
-				old->tx_dma_stats[0]->current_pointer);
+	is_tx_hw_tail_ptr_stuck = ethqos_is_dma_pointer_stuck(old->tx_dma_stats[0]->tail_pointer
+				, new->tx_dma_stats[0]->tail_pointer);
+	is_tx_hw_cur_ptr_stuck = ethqos_is_dma_pointer_stuck(old->tx_dma_stats[0]->current_pointer
+				, new->tx_dma_stats[0]->current_pointer);
 	is_tx_mmc_stuck = ethqos_is_mac_counter_stuck(old->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb
 					, new->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb) &&
 				!ethqos_is_mac_counter_stuck(old->cm_hw_stats->iomacro_error,
@@ -4991,8 +4991,8 @@ static enum stall_status ethqos_rx_hw_stall_status(struct health_monitor *old,
 		return UNKNOWN;
 	}
 
-	is_rx_mmc_stuck = ethqos_is_mac_counter_stuck(old->sw_path_dvr_stats->rx_pkt_n,
-					new->sw_path_dvr_stats->rx_pkt_n) &&
+	is_rx_mmc_stuck = ethqos_is_mac_counter_stuck(old->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb,
+					new->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb) &&
 				!ethqos_is_mac_counter_stuck(old->cm_hw_stats->iomacro_error,
 					new->cm_hw_stats->iomacro_error);
 	is_rx_hw_channel_stuck = ethqos_is_rx_channel_pointer_stuck(old->rx_dma_stats[0],
@@ -5024,8 +5024,8 @@ static enum stall_status ethqos_rx_sw_stall_status(struct health_monitor *old,
 		return UNKNOWN;
 	}
 
-	is_rx_mmc_stuck = ethqos_is_mac_counter_stuck(old->sw_path_dvr_stats->rx_pkt_n,
-					new->sw_path_dvr_stats->rx_pkt_n) &&
+	is_rx_mmc_stuck = ethqos_is_mac_counter_stuck(old->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb,
+					new->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb) &&
 				!ethqos_is_mac_counter_stuck(old->cm_hw_stats->iomacro_error,
 					new->cm_hw_stats->iomacro_error);
 	is_rx_sw_channel_stuck = ethqos_is_rx_channel_pointer_stuck(old->rx_dma_stats[channel],
