@@ -118,3 +118,4 @@ obj-$(CONFIG_TOUCHSCREEN_NT36XXX)	+= nt36xxx/
 obj-$(CONFIG_TOUCHSCREEN_PARADE)        += pt/
 obj-$(CONFIG_TOUCHSCREEN_RM_TS)         += raydium/
 obj-$(CONFIG_TOUCHSCREEN_CAP1296)       += cap1296.o
+obj-$(CONFIG_TOUCHSCREEN_IL7807S_TOUCH)       += il7807s_touch/
