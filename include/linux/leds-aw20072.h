@@ -11,8 +11,8 @@
  *Load config function
  *This driver will use load firmware if AW20072_BIN_CONFIG be defined
  *****************************************************/
-#define  AW20072_BIN_CONFIG
-/* #define  AW20072_ARRAY_CONFIG */
+/* #define  AW20072_BIN_CONFIG */
+#define  AW20072_ARRAY_CONFIG
 /******************************************************
  *
  * Register List
@@ -162,7 +162,7 @@ const unsigned char aw20072_reg_access[AW20072_REG_MAX] = {
  *
  ********************************************************/
 #define AW20072_RSTR       0x01
-#define AW20072_CHIPID      0x18
+#define AW20072_CHIPID     0x18
 
 enum aw20072_flags {
 	AW20072_FLAG_NONE = 0,
@@ -225,12 +225,13 @@ struct aw20072 {
 	struct work_struct brightness_work;
 	struct work_struct fw_work;
 	struct work_struct cfg_work;
+	struct delayed_work aw20072_work;
 #ifdef AWINIC_FW_UPDATE_DELAY
 	struct hrtimer fw_timer;
 #endif
 	struct mutex cfg_lock;
 
-	int reset_gpio;
+	int led_en_gpio;
 #ifdef CONFIG_OF
 	struct device_node *irq_node;
 	int irq_gpio;
@@ -240,7 +241,7 @@ struct aw20072 {
 	unsigned char chipid;
 	unsigned char fw_update;
 	unsigned char fw_flags;
-
+	unsigned int blink_flag;
 	unsigned int imax;
 	unsigned int fw_version;
 
