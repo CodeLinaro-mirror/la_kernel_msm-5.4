@@ -34,7 +34,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
 
 --- a/arch/arm/Kconfig
 +++ b/arch/arm/Kconfig
-@@ -80,7 +80,7 @@ config ARM
+@@ -82,7 +82,7 @@ config ARM
  	select HAS_IOPORT
  	select HAVE_ARCH_AUDITSYSCALL if AEABI && !OABI_COMPAT
  	select HAVE_ARCH_BITREVERSE if (CPU_32v7M || CPU_32v7) && !CPU_32v6
