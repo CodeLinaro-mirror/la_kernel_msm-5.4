@@ -47,6 +47,8 @@ int qseecom_create_key_in_slot(uint8_t usage_code, uint8_t key_slot, const uint8
 
 
 #if IS_ENABLED(CONFIG_QSEECOM)
+#define QSEE_CLK_ALREADY_ACTIVE					1
+
 int qseecom_process_listener_from_smcinvoke(uint32_t *result,
 					u64 *response_type, unsigned int *data);
 /*

@@ -1962,6 +1962,10 @@ int qseecom_set_msm_bus_request_from_smcinvoke(uint32_t mode)
 			pr_err("Failed to set bw INACTIVE\n");
 		return -EINVAL;
 	}
+
+	if ((mode == HIGH) && (qseecom.qsee.clk_access_cnt > 0))
+		return QSEE_CLK_ALREADY_ACTIVE;
+
 	ret = qseecom_scale_bus_bandwidth_timer(mode);
 	if (ret)
 		pr_err("Failed to set bw for request_mode (%d)\n", mode);
