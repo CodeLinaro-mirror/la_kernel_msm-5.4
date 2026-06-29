@@ -32,8 +32,8 @@
 #include <linux/miscdevice.h>
 #include <asm/uaccess.h>
 #include <linux/leds.h>
-#include "leds-aw20072.h"
-#include "leds-aw20072-reg.h"
+#include <linux/leds-aw20072.h>
+#include <linux/leds-aw20072-reg.h>
 /******************************************************
  *
  * Marco
@@ -47,16 +47,50 @@
 #define AW_I2C_RETRY_DELAY 1
 #define AW_READ_CHIPID_RETRIES 2
 #define AW_READ_CHIPID_RETRY_DELAY 1
-
-struct pinctrl *pinctrl_aw20072;
-struct pinctrl_state *aw20072_pins_cfg, *aw20072_rst_output0,
-    *aw20072_rst_output1;
-unsigned int aw20072debounce;
-
+#define AW_LED_CNT_MAX 24
 const struct of_device_id aw20072_of_match[] = {
 	{.compatible = "awinic,aw20072_led",},
 	{},
 };
+
+/*
+ *use for adjust led layout error map
+*/
+
+static int leds_map[144]= {
+	0 ,  0, 1 ,  1, 2 ,  2, /* 0 ->0 */
+	3 , 12, 4 , 13, 5 , 14, /* 1 ->4 */
+	6 , 24, 7 , 25, 8 , 26, /* 2 ->8 */
+	9 , 36, 10, 37, 11, 38, /* 3 ->12 */
+	12, 48, 13, 49, 14, 50, /* 4 ->16 */
+	15, 60, 16, 61, 17, 62, /* 5 ->20 */
+	18,  3, 19,  4, 20,  5, /* 6 ->1 */
+	21, 15, 22, 16, 23, 17, /* 7 ->5 */
+	24, 27, 25, 28, 26, 29, /* 8 ->9 */
+	27, 39, 28, 40, 29, 41, /* 9 ->13 */
+	30, 51, 31, 52, 32, 53, /* 10->17 */
+	33, 63, 34, 64, 35, 65, /* 11->21 */
+	36,  6, 37,  7, 38,  8, /* 12->2 */
+	39, 18, 40, 19, 41, 20, /* 13->6 */
+	42, 30, 43, 31, 44, 32, /* 14->10 */
+	45, 42, 46, 43, 47, 44, /* 15->14 */
+	48, 54, 49, 55, 50, 56, /* 16->18 */
+	51, 66, 52, 67, 53, 68, /* 17->22 */
+	54,  9, 55, 10, 56, 11, /* 18->3 */
+	57, 21, 58, 22, 59, 23, /* 19->7 */
+	60, 33, 61, 34, 62, 35, /* 20->11 */
+	63, 45, 64, 46, 65, 47, /* 21->15 */
+	66, 57, 67, 58, 68, 59, /* 22->19 */
+	69, 69, 70, 70, 71, 71, /* 23->23 */
+};
+
+static int search_match_led(int pos)
+{
+	if (pos < 0 || pos >= (ARRAY_SIZE(leds_map) / 2))
+		return -EINVAL;
+
+	return leds_map[pos * 2 + 1];
+}
 
 /******************************************************
  *
@@ -75,17 +109,16 @@ static char aw20072_cfg_name[][AW20072_CFG_NAME_MAX] = {
 };
 #elif defined(AW20072_ARRAY_CONFIG)
 AW20072_CFG aw20072_cfg_array[] = {
-	{aw20072_led_all_on, sizeof(aw20072_led_all_on)}
-	,
-	{aw20072_led_red_on, sizeof(aw20072_led_red_on)}
-	,
-	{aw20072_led_green_on, sizeof(aw20072_led_green_on)}
-	,
-	{aw20072_led_blue_on, sizeof(aw20072_led_blue_on)}
-	,
-	{aw20072_led_breath_forever, sizeof(aw20072_led_breath_forever)}
-	,
-	{aw20072_cfg_led_off, sizeof(aw20072_cfg_led_off)}
+	{aw20072_cfg_led_off, sizeof(aw20072_cfg_led_off)},
+	{aw20072_led_all_on, sizeof(aw20072_led_all_on)},
+	{aw20072_led_red_on, sizeof(aw20072_led_red_on)},
+	{aw20072_led_yellow_on, sizeof(aw20072_led_yellow_on)},
+	{aw20072_led_cyan_on, sizeof(aw20072_led_cyan_on)},
+	{aw20072_led_breath_forever, sizeof(aw20072_led_breath_forever)},
+	{aw20072_cyan_breath, sizeof(aw20072_cyan_breath)},
+	{aw20072_led_green_on, sizeof(aw20072_led_green_on)},
+	{aw20072_led_blue_on, sizeof(aw20072_led_blue_on)},
+	{aw20072_led_ptc_on, sizeof(aw20072_led_ptc_on)},
 };
 #else
     /*Nothing */
@@ -126,7 +159,7 @@ static int aw20072_i2c_write(struct aw20072 *aw20072,
 		ret =
 		    i2c_smbus_write_byte_data(aw20072->i2c, reg_addr, reg_data);
 		if (ret < 0) {
-			pr_err("%s: i2c_write cnt=%d error=%d\n", __func__, cnt,
+			dev_err(aw20072->dev, "%s: i2c_write cnt=%d error=%d\n", __func__, cnt,
 			       ret);
 		} else {
 			break;
@@ -147,7 +180,7 @@ static int aw20072_i2c_read(struct aw20072 *aw20072,
 	while (cnt < AW_I2C_RETRIES) {
 		ret = i2c_smbus_read_byte_data(aw20072->i2c, reg_addr);
 		if (ret < 0) {
-			pr_err("%s: i2c_read cnt=%d error=%d\n", __func__, cnt,
+			dev_err(aw20072->dev, "%s: i2c_read cnt=%d error=%d\n", __func__, cnt,
 			       ret);
 		} else {
 			*reg_data = ret;
@@ -200,7 +233,7 @@ static int aw20072_dbgdim_cfg(struct aw20072 *aw20072, unsigned int data)
 {
 	int i;
 
-	aw20072_i2c_write(aw20072, 0xF0, 0xC4);
+	aw20072_i2c_write(aw20072, REG_PAGE, 0xC4);
 	for (i = 0; i < AW20072_REG_NUM_PAG4; i = i + 2) {
 		aw20072->rgbcolor = data;
 		aw20072_i2c_write(aw20072, i, aw20072->rgbcolor);
@@ -212,7 +245,7 @@ static int aw20072_dbgfdad_cfg(struct aw20072 *aw20072, unsigned int data)
 {
 	int i;
 
-	aw20072_i2c_write(aw20072, 0xF0, 0xC4);
+	aw20072_i2c_write(aw20072, REG_PAGE, 0xC4);
 	for (i = 1; i < AW20072_REG_NUM_PAG4; i = i + 2) {
 		aw20072->rgbcolor = data;
 		aw20072_i2c_write(aw20072, i, aw20072->rgbcolor);
@@ -226,20 +259,18 @@ static void aw20072_brightness_work(struct work_struct *work)
 	struct aw20072 *aw20072 = container_of(work, struct aw20072,
 					       brightness_work);
 
-	pr_info("%s: enter\n", __func__);
-
 	if (aw20072->cdev.brightness > aw20072->cdev.max_brightness)
 		aw20072->cdev.brightness = aw20072->cdev.max_brightness;
 
 	if (aw20072->cdev.brightness) {
-		aw20072_i2c_write(aw20072, 0xF0, 0xC0);
+		aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE0);
 		aw20072_i2c_write(aw20072, 0x01, 0x00);
 		aw20072_dbgdim_cfg(aw20072, AW20072_DBGCTR_DIM);
 		aw20072_dbgfdad_cfg(aw20072, aw20072->cdev.brightness);
 	} else {
 		aw20072_dbgdim_cfg(aw20072, 0x00);
 		aw20072_dbgfdad_cfg(aw20072, 0);
-		aw20072_i2c_write(aw20072, 0xF0, 0xC0);
+		aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE0);
 		aw20072_i2c_write(aw20072, 0x01, 0x80);
 	}
 }
@@ -269,7 +300,7 @@ static void aw20072_update_cfg_array(struct aw20072 *aw20072,
 
 	for (i = 0; i < cfg_size; i += 2) {
 		aw20072_i2c_write(aw20072, p_cfg_data[i], p_cfg_data[i + 1]);
-		if (p_cfg_data[i] == 0xf0)
+		if (p_cfg_data[i] == REG_PAGE)
 			page = p_cfg_data[i + 1];
 		if ((page == AW20072_REG_PAGE0)
 		    && (p_cfg_data[i] == REG_SWRST)
@@ -280,8 +311,6 @@ static void aw20072_update_cfg_array(struct aw20072 *aw20072,
 
 static int aw20072_cfg_update_array(struct aw20072 *aw20072)
 {
-	pr_info("%s: enter\n", __func__);
-
 	aw20072_update_cfg_array(aw20072,
 				 (aw20072_cfg_array[aw20072->effect].p),
 				 aw20072_cfg_array[aw20072->effect].count);
@@ -297,23 +326,21 @@ static void aw20072_cfg_loaded(const struct firmware *cont, void *context)
 	unsigned char reg_addr = 0;
 	unsigned char reg_val = 0;
 
-	pr_info("%s: enter\n", __func__);
-
 	if (!cont) {
-		pr_info("%s: failed to read %s\n", __func__,
+		dev_err(aw20072->dev, "%s: failed to read %s\n", __func__,
 			aw20072_cfg_name[aw20072->effect]);
 		release_firmware(cont);
 		return;
 	}
 	mutex_lock(&aw20072->cfg_lock);
-	pr_info("%s: loaded %s - size: %zu\n", __func__,
+	dev_dbg(aw20072->dev, "%s: loaded %s - size: %zu\n", __func__,
 		aw20072_cfg_name[aw20072->effect], cont ? cont->size : 0);
 	for (i = 0; i < cont->size; i += 2) {
-		if (*(cont->data + i) == 0xf0)
+		if (*(cont->data + i) == REG_PAGE)
 			page = *(cont->data + i + 1);
 		aw20072_i2c_write(aw20072, *(cont->data + i),
 				  *(cont->data + i + 1));
-		pr_debug("%s: addr:0x%02x, data:0x%02x\n", __func__,
+		dev_dbg(aw20072->dev, "%s: addr:0x%02x, data:0x%02x\n", __func__,
 			 *(cont->data + i), *(cont->data + i + 1));
 
 		if (page == AW20072_REG_PAGE0) {
@@ -327,22 +354,19 @@ static void aw20072_cfg_loaded(const struct firmware *cont, void *context)
 
 	release_firmware(cont);
 	mutex_unlock(&aw20072->cfg_lock);
-	pr_info("%s: cfg update complete\n", __func__);
+	dev_dbg(aw20072->dev, "%s: cfg update complete\n", __func__);
 
 }
 
 static int aw20072_cfg_update(struct aw20072 *aw20072)
 {
-	int ret;
-
-	pr_info("%s: enter\n", __func__);
-	ret = 0;
+	int ret = 0;
 
 	if (aw20072->effect < (sizeof(aw20072_cfg_name) / AW20072_CFG_NAME_MAX)) {
-		pr_info("%s: cfg name=%s\n", __func__,
+		dev_dbg(aw20072->dev, "%s: cfg name=%s\n", __func__,
 			aw20072_cfg_name[aw20072->effect]);
 	} else {
-		pr_err("%s: effect 0x%02x over s value\n", __func__,
+		dev_err(aw20072->dev, "%s: effect 0x%02x over s value\n", __func__,
 		       aw20072->effect);
 		return (-1);
 	}
@@ -354,91 +378,6 @@ static int aw20072_cfg_update(struct aw20072 *aw20072)
 }
 #endif
 
-static int aw20072_hw_reset(struct aw20072 *aw20072)
-{
-	pr_info("%s: enter\n", __func__);
-
-	if (aw20072 && gpio_is_valid(aw20072->reset_gpio)) {
-		gpio_set_value_cansleep(aw20072->reset_gpio, 0);
-		msleep(1);
-		gpio_set_value_cansleep(aw20072->reset_gpio, 1);
-		usleep_range(2000, 2500);
-	} else {
-		dev_err(aw20072->dev, "%s:  failed\n", __func__);
-	}
-	pr_info("%s: enter out\n", __func__);
-	return 0;
-}
-
-static int aw20072_hw_off(struct aw20072 *aw20072)
-{
-	pr_info("%s: enter\n", __func__);
-	if (aw20072 && gpio_is_valid(aw20072->reset_gpio)) {
-		gpio_set_value_cansleep(aw20072->reset_gpio, 0);
-		msleep(1);
-	} else {
-		dev_err(aw20072->dev, "%s:  failed\n", __func__);
-	}
-
-	return 0;
-}
-
-/******************************************************
- *
- * irq
- *
- ******************************************************/
-
-static irqreturn_t aw20072_irq(int irq, void *data)
-{
-	struct aw20072 *aw20072 = data;
-	unsigned char reg_val;
-
-	pr_info("%s: enter\n", __func__);
-
-	aw20072_i2c_read(aw20072, REG_ISRFLT, &reg_val);
-	pr_info("%s: reg INTST=0x%x\n", __func__, reg_val);
-	pr_info("%s exit\n", __func__);
-
-	return IRQ_HANDLED;
-}
-
-/*****************************************************
- *
- * device tree
- *
- *****************************************************/
-static int aw20072_parse_dt(struct device *dev, struct aw20072 *aw20072,
-			    struct device_node *np)
-{
-
-	aw20072->reset_gpio = of_get_named_gpio(np, "reset-gpio", 0);
-	if (aw20072->reset_gpio < 0) {
-		dev_err(dev,
-			"%s: no reset gpio provided, will not HW reset device\n",
-			__func__);
-		return (-1);
-	} else {
-		dev_info(dev, "%s: reset gpio provided ok\n", __func__);
-	}
-	aw20072->irq_gpio = of_get_named_gpio(np, "irq-gpio", 0);
-	if (aw20072->irq_gpio < 0) {
-		dev_err(dev,
-			"%s: no irq gpio provided, will not suppport intterupt\n",
-			__func__);
-		return (-1);
-	} else {
-		dev_info(dev, "%s: irq gpio provided ok\n", __func__);
-	}
-
-	return 0;
-}
-
-/*****************************************************
- *
- * check chip id
- *
- *****************************************************/
 static int aw20072_read_chipid(struct aw20072 *aw20072)
 {
 	int ret = -1;
@@ -450,27 +389,143 @@ static int aw20072_read_chipid(struct aw20072 *aw20072)
 	while (cnt++ < AW_READ_CHIPID_RETRIES) {
 		ret = aw20072_i2c_read(aw20072, REG_CHIPID, &reg_val);
 		if (reg_val == AW20072_CHIPID) {
-			pr_info("This Chip is  AW20072    REG_ID: 0x%x\n",
-				reg_val);
+			dev_dbg(aw20072->dev, "Chip AW20072 ID: 0x%x\n", reg_val);
 			return 0;
 		} else if (ret < 0) {
-			dev_err(aw20072->dev,
-				"%s: failed to AW20072_REG_ID: %d\n", __func__,
-				ret);
+			dev_err(aw20072->dev, "Failed to AW20072_REG_ID: %d\n", ret);
 		} else {
-			pr_info("This Chip    read register   REG_ID: 0x%x\n",
-				reg_val);
+			dev_dbg(aw20072->dev, "Read Chip ID register : 0x%x\n", reg_val);
 		}
 		msleep(AW_READ_CHIPID_RETRY_DELAY);
 	}
 	return -EINVAL;
 }
 
-/******************************************************
- *
- * sys group attribute: reg
- *
- ******************************************************/
+static int aw20072_effect(struct aw20072 *aw20072,unsigned int num)
+{
+	if (num > ARRAY_SIZE(aw20072_cfg_array) - 1)
+	{
+		dev_err(aw20072->dev, "Input Effect Out of Range\n");
+		return -1;
+	}
+	aw20072->effect = num;
+#if defined(AW20072_BIN_CONFIG)
+	aw20072_cfg_update(aw20072);
+#elif defined(AW20072_ARRAY_CONFIG)
+	aw20072_cfg_update_array(aw20072);
+#else
+	/*Nothing */
+#endif
+	return 0;
+}
+
+static void set_all_rgbcolor(struct aw20072 *aw20072, unsigned int databuf)
+{
+	unsigned int i;
+
+	aw20072->rgbcolor = databuf;
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE0);
+	aw20072_i2c_write(aw20072, 0x01, 0x00);
+	/*Set page 1 DIM0-DIM35 */
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE1);
+	for (i = 0; i < AW20072_REG_NUM_PAG1; i += 3) {
+		aw20072->rgbcolor = (databuf & 0x00ff0000) >> 16;
+		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
+		aw20072_i2c_write(aw20072, i, aw20072->rgbcolor);
+
+		aw20072->rgbcolor = (databuf & 0x0000ff00) >> 8;
+		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
+		aw20072_i2c_write(aw20072, i + 1, aw20072->rgbcolor);
+
+		aw20072->rgbcolor = (databuf & 0x000000ff);
+		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
+		aw20072_i2c_write(aw20072, i + 2, aw20072->rgbcolor);
+		dev_dbg(aw20072->dev, "%s: addr:0x%02x, data:0x%02x\n", __func__, i,
+			 aw20072->rgbcolor);
+	}
+}
+
+static void set_one_rgbcolor(struct aw20072 *aw20072,unsigned int pos,
+		unsigned int data)
+{
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE0);
+	aw20072_i2c_write(aw20072, 0x01, 0x00);
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE1);
+
+	aw20072->rgbcolor = (data & 0x00ff0000) >> 16;
+	aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
+	aw20072_i2c_write(aw20072, search_match_led(pos * 3), aw20072->rgbcolor);
+
+	aw20072->rgbcolor = (data & 0x0000ff00) >> 8;
+	aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
+	aw20072_i2c_write(aw20072, search_match_led(pos * 3 + 1),
+				aw20072->rgbcolor);
+
+	aw20072->rgbcolor = (data & 0x000000ff);
+	aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
+	aw20072_i2c_write(aw20072, search_match_led(pos * 3 + 2),
+				aw20072->rgbcolor);
+}
+
+static void set_one_rgbbrightness(struct aw20072 *aw20072, unsigned int pos,
+		unsigned int data)
+{
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE0);
+	aw20072_i2c_write(aw20072, 0x01, 0x00);
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE3);
+	aw20072->rgbbrightness = (data & 0x00ff0000) >> 16;
+	aw20072_i2c_write(aw20072, pos * 3,
+				aw20072->rgbbrightness);
+
+	aw20072->rgbbrightness = (data & 0x0000ff00) >> 8;
+	aw20072_i2c_write(aw20072, pos * 3 + 1,
+				aw20072->rgbbrightness);
+
+	aw20072->rgbbrightness = (data & 0x000000ff);
+	aw20072_i2c_write(aw20072, pos * 3 + 2,
+				aw20072->rgbbrightness);
+}
+
+static void set_all_rgbbrightness(struct aw20072 *aw20072, unsigned int databuf)
+{
+	unsigned int i = 0;
+
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE0);
+	aw20072_i2c_write(aw20072, 0x01, 0x00);
+	/*Set pag 2 PAD0-PAD35 */
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE2);
+	for (i = 0; i < AW20072_REG_NUM_PAG2; i += 3) {
+		aw20072->rgbbrightness = (databuf & 0x00ff0000) >> 16;
+		aw20072_i2c_write(aw20072, i, aw20072->rgbbrightness);
+
+		aw20072->rgbbrightness = (databuf & 0x0000ff00) >> 8;
+		aw20072_i2c_write(aw20072, i + 1, aw20072->rgbbrightness);
+
+		aw20072->rgbbrightness = (databuf & 0x000000ff);
+		aw20072_i2c_write(aw20072, i + 2, aw20072->rgbbrightness);
+		dev_dbg(aw20072->dev, "%s: addr:0x%02x, data:0x%02x\n", __func__, i,
+			 aw20072->rgbbrightness);
+	}
+}
+
+static int aw20072_ptc(struct aw20072 *aw20072, unsigned int num,
+		unsigned int rgbcolor, unsigned int brightness)
+{
+	unsigned int i;
+	if (num > AW_LED_CNT_MAX) {
+		dev_err(aw20072->dev, "AW: can't set it\n");
+		return -1;
+	}
+
+	aw20072_effect(aw20072, 9);
+	for (i = 0; i < num; i++) {
+		set_one_rgbcolor(aw20072 , i, rgbcolor);
+		set_one_rgbbrightness(aw20072 , i, brightness);
+	}
+
+	return 0;
+}
+
 static ssize_t aw20072_reg_store(struct device *dev,
 				 struct device_attribute *attr, const char *buf,
 				 size_t count)
@@ -505,38 +560,6 @@ static ssize_t aw20072_reg_show(struct device *dev,
 		len += snprintf(buf + len, PAGE_SIZE - len,
 				"reg:0x%02x=0x%02x\n", i, reg_val);
 	}
-	return len;
-}
-
-static ssize_t aw20072_hwen_store(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	struct led_classdev *led_cdev = dev_get_drvdata(dev);
-	struct aw20072 *aw20072 = container_of(led_cdev, struct aw20072, cdev);
-
-	unsigned int databuf[1] = { 0 };
-
-	if (sscanf(buf, "%x", &databuf[0]) == 1) {
-		if (databuf[0] == 1)
-			aw20072_hw_reset(aw20072);
-		else
-			aw20072_hw_off(aw20072);
-	}
-
-	return count;
-}
-
-static ssize_t aw20072_hwen_show(struct device *dev,
-				 struct device_attribute *attr, char *buf)
-{
-	struct led_classdev *led_cdev = dev_get_drvdata(dev);
-	struct aw20072 *aw20072 = container_of(led_cdev, struct aw20072, cdev);
-	ssize_t len = 0;
-
-	len += snprintf(buf + len, PAGE_SIZE - len, "hwen=%d\n",
-			gpio_get_value(aw20072->reset_gpio));
-
 	return len;
 }
 
@@ -581,15 +604,7 @@ static ssize_t aw20072_effect_store(struct device *dev,
 	struct aw20072 *aw20072 = container_of(led_cdev, struct aw20072, cdev);
 
 	sscanf(buf, "%x", &databuf[0]);
-	aw20072->effect = databuf[0];
-#if defined(AW20072_BIN_CONFIG)
-	aw20072_cfg_update(aw20072);
-#elif defined(AW20072_ARRAY_CONFIG)
-	aw20072_cfg_update_array(aw20072);
-#else
-	/*Nothing */
-#endif
-
+	aw20072_effect(aw20072, databuf[0]);
 	return len;
 }
 
@@ -641,23 +656,7 @@ static ssize_t aw20072_rgbcolor_store(struct device *dev,
 	struct aw20072 *aw20072 = container_of(led_cdev, struct aw20072, cdev);
 
 	if (sscanf(buf, "%x %x", &databuf[0], &databuf[1]) == 2) {
-		aw20072_i2c_write(aw20072, 0xF0, 0xC0);
-		aw20072_i2c_write(aw20072, 0x01, 0x00);
-		aw20072_i2c_write(aw20072, 0xF0, 0xC1);
-
-		aw20072->rgbcolor = (databuf[1] & 0x00ff0000) >> 16;
-		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
-		aw20072_i2c_write(aw20072, databuf[0] * 3, aw20072->rgbcolor);
-
-		aw20072->rgbcolor = (databuf[1] & 0x0000ff00) >> 8;
-		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
-		aw20072_i2c_write(aw20072, databuf[0] * 3 + 1,
-				  aw20072->rgbcolor);
-
-		aw20072->rgbcolor = (databuf[1] & 0x000000ff);
-		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
-		aw20072_i2c_write(aw20072, databuf[0] * 3 + 2,
-				  aw20072->rgbcolor);
+		set_one_rgbcolor(aw20072,databuf[0],databuf[1]);
 	}
 	return len;
 }
@@ -671,20 +670,7 @@ static ssize_t aw20072_rgbbrightness_store(struct device *dev,
 	struct aw20072 *aw20072 = container_of(led_cdev, struct aw20072, cdev);
 
 	if (sscanf(buf, "%x %x", &databuf[0], &databuf[1]) == 2) {
-		aw20072_i2c_write(aw20072, 0xF0, 0xC0);
-		aw20072_i2c_write(aw20072, 0x01, 0x00);
-		aw20072_i2c_write(aw20072, 0xF0, 0xC2);
-		aw20072->rgbbrightness = (databuf[1] & 0x00ff0000) >> 16;
-		aw20072_i2c_write(aw20072, databuf[0] * 3,
-				  aw20072->rgbbrightness);
-
-		aw20072->rgbbrightness = (databuf[1] & 0x0000ff00) >> 8;
-		aw20072_i2c_write(aw20072, databuf[0] * 3 + 1,
-				  aw20072->rgbbrightness);
-
-		aw20072->rgbbrightness = (databuf[1] & 0x000000ff);
-		aw20072_i2c_write(aw20072, databuf[0] * 3 + 2,
-				  aw20072->rgbbrightness);
+		set_one_rgbbrightness(aw20072, databuf[0], databuf[1]);
 	}
 	return len;
 }
@@ -694,31 +680,11 @@ static ssize_t aw20072_allrgbcolor_store(struct device *dev,
 					 const char *buf, size_t len)
 {
 	unsigned int databuf[1];
-	unsigned int i;
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	struct aw20072 *aw20072 = container_of(led_cdev, struct aw20072, cdev);
 
 	sscanf(buf, "%x", &databuf[0]);
-	aw20072->rgbcolor = databuf[0];
-	aw20072_i2c_write(aw20072, 0xF0, 0xC0);
-	aw20072_i2c_write(aw20072, 0x01, 0x00);
-	/*Set pag 1 DIM0-DIM35 */
-	aw20072_i2c_write(aw20072, 0xF0, 0xC1);
-	for (i = 0; i < AW20072_REG_NUM_PAG1; i += 3) {
-		aw20072->rgbcolor = (databuf[0] & 0x00ff0000) >> 16;
-		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
-		aw20072_i2c_write(aw20072, i, aw20072->rgbcolor);
-
-		aw20072->rgbcolor = (databuf[0] & 0x0000ff00) >> 8;
-		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
-		aw20072_i2c_write(aw20072, i + 1, aw20072->rgbcolor);
-
-		aw20072->rgbcolor = (databuf[0] & 0x000000ff);
-		aw20072->rgbcolor = (aw20072->rgbcolor * 64) / 256;
-		aw20072_i2c_write(aw20072, i + 2, aw20072->rgbcolor);
-		pr_debug("%s: addr:0x%02x, data:0x%02x\n", __func__, i,
-			 aw20072->rgbcolor);
-	}
+	set_all_rgbcolor(aw20072, databuf[0]);
 	return len;
 }
 
@@ -727,33 +693,47 @@ static ssize_t aw20072_allrgbbrightness_store(struct device *dev,
 					      const char *buf, size_t len)
 {
 	unsigned int databuf[2];
-	unsigned int i;
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	struct aw20072 *aw20072 = container_of(led_cdev, struct aw20072, cdev);
 
 	sscanf(buf, "%x", &databuf[0]);
-	aw20072_i2c_write(aw20072, 0xF0, 0xC0);
-	aw20072_i2c_write(aw20072, 0x01, 0x00);
-	/*Set pag 2 PAD0-PAD35 */
-	aw20072_i2c_write(aw20072, 0xF0, 0xC2);
-	for (i = 0; i < AW20072_REG_NUM_PAG2; i += 3) {
-		aw20072->rgbbrightness = (databuf[0] & 0x00ff0000) >> 16;
-		aw20072_i2c_write(aw20072, i, aw20072->rgbbrightness);
+	set_all_rgbbrightness(aw20072, databuf[0]);
+	return len;
+}
 
-		aw20072->rgbbrightness = (databuf[0] & 0x0000ff00) >> 8;
-		aw20072_i2c_write(aw20072, i + 1, aw20072->rgbbrightness);
+static ssize_t aw20072_cfg_store(struct device *dev, struct device_attribute *attr,
+		       const char *buf, size_t len)
+{
+	unsigned int databuf[2]={0,0};
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	struct aw20072 *aw20072 = container_of(led_cdev, struct aw20072, cdev);
 
-		aw20072->rgbbrightness = (databuf[0] & 0x000000ff);
-		aw20072_i2c_write(aw20072, i + 2, aw20072->rgbbrightness);
-		pr_debug("%s: addr:0x%02x, data:0x%02x\n", __func__, i,
-			 aw20072->rgbbrightness);
+	sscanf(buf, "%d",  &databuf[0]);
+
+	switch (databuf[0]) {
+		case 1:
+			if (sscanf(buf, "%d %d ", &databuf[0],&databuf[1]) == 2)
+				aw20072_ptc(aw20072, databuf[1], 0x00FFFFFF, 0xFFFFFF);
+			break;
+		case 2:
+			aw20072->blink_flag = 1;
+			aw20072_effect(aw20072,0);
+			schedule_delayed_work(&aw20072->aw20072_work, 1);
+			break;
+
+		case 3:
+			aw20072->blink_flag = 0;
+			aw20072_effect(aw20072,0);
+			schedule_delayed_work(&aw20072->aw20072_work, 1);
+			break;
+
+		default:
+			break;
 	}
 	return len;
 }
 
 static DEVICE_ATTR(reg, S_IWUSR | S_IRUGO, aw20072_reg_show, aw20072_reg_store);
-static DEVICE_ATTR(hwen, S_IWUSR | S_IRUGO, aw20072_hwen_show,
-		   aw20072_hwen_store);
 static DEVICE_ATTR(effect, S_IWUSR | S_IRUGO, aw20072_effect_show,
 		   aw20072_effect_store);
 static DEVICE_ATTR(imax, S_IWUSR | S_IRUGO, aw20072_imax_show,
@@ -765,16 +745,17 @@ static DEVICE_ATTR(allrgbcolor, S_IWUSR | S_IRUGO, NULL,
 		   aw20072_allrgbcolor_store);
 static DEVICE_ATTR(allrgbbrightness, S_IWUSR | S_IRUGO, NULL,
 		   aw20072_allrgbbrightness_store);
-
+static DEVICE_ATTR(cfg, S_IWUSR | S_IRUGO, NULL,
+		   aw20072_cfg_store);
 static struct attribute *aw20072_attributes[] = {
 	&dev_attr_reg.attr,
-	&dev_attr_hwen.attr,
 	&dev_attr_effect.attr,
 	&dev_attr_imax.attr,
 	&dev_attr_rgbcolor.attr,
 	&dev_attr_allrgbcolor.attr,
 	&dev_attr_rgbbrightness.attr,
 	&dev_attr_allrgbbrightness.attr,
+	&dev_attr_cfg.attr,
 	NULL
 };
 
@@ -782,16 +763,26 @@ static struct attribute_group aw20072_attribute_group = {
 	.attrs = aw20072_attributes
 };
 
-/******************************************************
- *
- * led class dev
- *
- ******************************************************/
+static void aw20072_work(struct work_struct *work){
+	struct aw20072 *aw20072 = container_of(work, struct aw20072, aw20072_work.work);
+	if (aw20072->blink_flag == 1)
+	{
+		if (aw20072->effect == 3)
+		{
+			aw20072_effect(aw20072,0);
+			schedule_delayed_work(&aw20072->aw20072_work, msecs_to_jiffies(500));/*500ms */
+		}
+		else if (aw20072->effect == 0)
+		{
+			aw20072_effect(aw20072,3);
+			schedule_delayed_work(&aw20072->aw20072_work, msecs_to_jiffies(500));/*500ms */
+		}
+	}
+}
+
 static int aw20072_led_init(struct aw20072 *aw20072)
 {
-	pr_info("%s: enter\n", __func__);
-
-	aw20072_i2c_write(aw20072, 0xF0, 0xC0);
+	aw20072_i2c_write(aw20072, REG_PAGE, AW20072_REG_PAGE1);
 	aw20072_i2c_write(aw20072, 0x02, 0x01);
 	msleep(2);
 	aw20072_i2c_write(aw20072, 0X03, 0x10);	/*SET default */
@@ -803,60 +794,74 @@ static int aw20072_led_init(struct aw20072 *aw20072)
 	return 0;
 }
 
-static int aw20072_parse_led_cdev(struct aw20072 *aw20072,
-				  struct device_node *np)
+static int aw20072_parse_dts(struct aw20072 *aw20072,
+	  struct device_node *np)
 {
-	struct device_node *temp;
+	struct device_node *node;
 	int ret = -1;
 
-	pr_info("%s: enter\n", __func__);
-
-	for_each_child_of_node(np, temp) {
-		ret = of_property_read_string(temp, "aw20072,name",
+	for_each_child_of_node(np, node) {
+		ret = of_property_read_string(node, "aw20072,name",
 					      &aw20072->cdev.name);
+		if (ret < 0) 
+			dev_err(aw20072->dev, "Failure reading led name, ret=%d\n", ret);
+
+		ret = of_property_read_u32(node, "aw20072,imax", &aw20072->imax);
 		if (ret < 0) {
-			dev_err(aw20072->dev,
-				"Failure reading led name, ret = %d\n", ret);
-			goto free_pdata;
+			dev_err(aw20072->dev, "Failure reading imax, ret=%d\n", ret);
+			aw20072->imax = 1;
 		}
-		ret = of_property_read_u32(temp, "aw20072,imax",
-					   &aw20072->imax);
-		if (ret < 0) {
-			dev_err(aw20072->dev,
-				"Failure reading imax, ret = %d\n", ret);
-			goto free_pdata;
-		}
-		ret = of_property_read_u32(temp, "aw20072,brightness",
+
+		ret = of_property_read_u32(node, "aw20072,brightness",
 					   &aw20072->cdev.brightness);
 		if (ret < 0) {
-			dev_err(aw20072->dev,
-				"Failure reading brightness, ret = %d\n", ret);
-			goto free_pdata;
+			dev_err(aw20072->dev, "Failure reading brightness, ret=%d\n", ret);
+			aw20072->cdev.brightness = 200;
 		}
-		ret = of_property_read_u32(temp, "aw20072,max_brightness",
+
+		ret = of_property_read_u32(node, "aw20072,max_brightness",
 					   &aw20072->cdev.max_brightness);
 		if (ret < 0) {
-			dev_err(aw20072->dev,
-				"Failure reading max brightness, ret = %d\n",
-				ret);
-			goto free_pdata;
+			dev_err(aw20072->dev, "Failure reading max brightness, ret=%d\n", ret);
+			aw20072->cdev.max_brightness = 255;
 		}
 	}
+
+	aw20072->led_en_gpio = of_get_named_gpio(np, "led-en-gpio", 0);
+	if (gpio_is_valid(aw20072->led_en_gpio)) {
+		ret = gpio_request(aw20072->led_en_gpio, "aw20072_led_en");
+		if (!ret)
+			gpio_direction_output(aw20072->led_en_gpio, 1);
+	} else {
+		dev_err(aw20072->dev, "%s: gpio %d is invalid!\n", __func__, aw20072->led_en_gpio);
+	}
+
+	return ret;
+}
+
+static int aw20072_register_led_cdev(struct aw20072 *aw20072,
+	  struct device_node *np)
+{
+	int ret;
+
 	aw20072_led_init(aw20072);
+
 	INIT_WORK(&aw20072->brightness_work, aw20072_brightness_work);
+
 	aw20072->cdev.brightness_set = aw20072_set_brightness;
 	ret = led_classdev_register(aw20072->dev, &aw20072->cdev);
 	if (ret) {
 		dev_err(aw20072->dev, "unable to register led ret=%d\n", ret);
 		goto free_pdata;
 	}
-	ret =
-	    sysfs_create_group(&aw20072->cdev.dev->kobj,
+
+	ret = sysfs_create_group(&aw20072->cdev.dev->kobj,
 			       &aw20072_attribute_group);
 	if (ret) {
 		dev_err(aw20072->dev, "led sysfs ret: %d\n", ret);
 		goto free_class;
 	}
+
 	return 0;
 
  free_class:
@@ -865,20 +870,14 @@ static int aw20072_parse_led_cdev(struct aw20072 *aw20072,
 	return ret;
 }
 
-/******************************************************
- *
- * i2c driver
- *
- ******************************************************/
 static int aw20072_i2c_probe(struct i2c_client *i2c,
 			     const struct i2c_device_id *id)
 {
 	struct aw20072 *aw20072;
 	struct device_node *np = i2c->dev.of_node;
 	int ret;
-	int irq_flags;
 
-	pr_info("%s: enter\n", __func__);
+	dev_dbg(&i2c->dev, "aw20072 driver version %s\n", AW20072_DRIVER_VERSION);
 
 	if (!i2c_check_functionality(i2c->adapter, I2C_FUNC_I2C)) {
 		dev_err(&i2c->dev, "check_functionality failed\n");
@@ -896,91 +895,35 @@ static int aw20072_i2c_probe(struct i2c_client *i2c,
 
 	mutex_init(&aw20072->cfg_lock);
 
-	/* aw20072 rst & int */
-	if (np) {
-		ret = aw20072_parse_dt(&i2c->dev, aw20072, np);
-		if (ret) {
-			dev_err(&i2c->dev,
-				"%s: failed to parse device tree node\n",
-				__func__);
-			goto err_parse_dt;
-		}
-	} else {
-		aw20072->reset_gpio = -1;
-		aw20072->irq_gpio = -1;
-	}
+	ret = aw20072_parse_dts(aw20072, np);
+	if (ret < 0)
+		goto err_id;
 
-	if (gpio_is_valid(aw20072->reset_gpio)) {
-		ret = devm_gpio_request_one(&i2c->dev, aw20072->reset_gpio,
-					    GPIOF_OUT_INIT_LOW, "aw20072_rst");
-		if (ret) {
-			dev_err(&i2c->dev, "%s: rst request failed\n",
-				__func__);
-			goto err_gpio_request;
-		}
-	}
-
-	if (gpio_is_valid(aw20072->irq_gpio)) {
-		ret = devm_gpio_request_one(&i2c->dev, aw20072->irq_gpio,
-					    GPIOF_DIR_IN, "aw20072_int");
-		if (ret) {
-			dev_err(&i2c->dev, "%s: int request failed\n",
-				__func__);
-			goto err_gpio_request;
-		}
-	}
-
-	/* hardware reset */
-	aw20072_hw_reset(aw20072);
-
-	/* aw20072 chip id */
 	ret = aw20072_read_chipid(aw20072);
 	if (ret < 0) {
-		dev_err(&i2c->dev, "%s: aw20072_read_chipid failed ret=%d\n",
-			__func__, ret);
-		goto err_id;
-	}
-
-	/* aw22xxx irq */
-	if (gpio_is_valid(aw20072->irq_gpio) &&
-	    !(aw20072->flags & AW20072_FLAG_SKIP_INTERRUPTS)) {
-		/* register irq handler */
-		irq_flags = IRQF_TRIGGER_FALLING | IRQF_ONESHOT;
-		ret = devm_request_threaded_irq(&i2c->dev,
-						gpio_to_irq(aw20072->irq_gpio),
-						NULL, aw20072_irq, irq_flags,
-						"aw20072", aw20072);
-		if (ret != 0) {
-			dev_err(&i2c->dev, "%s: failed to request IRQ %d: %d\n",
-				__func__, gpio_to_irq(aw20072->irq_gpio), ret);
-			goto err_irq;
-		}
-	} else {
-		dev_info(&i2c->dev, "%s skipping IRQ registration\n", __func__);
-		/* disable feature support if gpio was invalid */
-		aw20072->flags |= AW20072_FLAG_SKIP_INTERRUPTS;
+		goto err_gpio;
 	}
 
 	dev_set_drvdata(&i2c->dev, aw20072);
 
-	aw20072_parse_led_cdev(aw20072, np);
+	aw20072_register_led_cdev(aw20072, np);
 	if (ret < 0) {
 		dev_err(&i2c->dev, "%s error creating led class dev\n",
 			__func__);
 		goto err_sysfs;
 	}
+	INIT_DELAYED_WORK(&aw20072->aw20072_work, aw20072_work);
 
-	pr_info("%s probe completed successfully!\n", __func__);
+	aw20072_effect(aw20072, 8);
+
+	dev_dbg(&i2c->dev, "probe completed successfully!\n");
+
 	return 0;
 
- err_sysfs:
-	devm_free_irq(&i2c->dev, gpio_to_irq(aw20072->irq_gpio), aw20072);
- err_irq:
- err_id:
-	devm_gpio_free(&i2c->dev, aw20072->reset_gpio);
-	devm_gpio_free(&i2c->dev, aw20072->irq_gpio);
- err_gpio_request:
- err_parse_dt:
+err_sysfs:
+err_gpio:
+	gpio_free(aw20072->led_en_gpio);
+err_id:
 	devm_kfree(&i2c->dev, aw20072);
 	aw20072 = NULL;
 	return ret;
@@ -990,16 +933,8 @@ static int aw20072_i2c_remove(struct i2c_client *i2c)
 {
 	struct aw20072 *aw20072 = i2c_get_clientdata(i2c);
 
-	pr_info("%s: enter\n", __func__);
 	sysfs_remove_group(&aw20072->cdev.dev->kobj, &aw20072_attribute_group);
 	led_classdev_unregister(&aw20072->cdev);
-
-	devm_free_irq(&i2c->dev, gpio_to_irq(aw20072->irq_gpio), aw20072);
-
-	if (gpio_is_valid(aw20072->reset_gpio))
-		devm_gpio_free(&i2c->dev, aw20072->reset_gpio);
-	if (gpio_is_valid(aw20072->irq_gpio))
-		devm_gpio_free(&i2c->dev, aw20072->irq_gpio);
 
 	devm_kfree(&i2c->dev, aw20072);
 	aw20072 = NULL;
@@ -1034,8 +969,6 @@ static int __init aw20072_i2c_init(void)
 {
 	int ret = 0;
 
-	pr_info("aw20072 driver version %s\n", AW20072_DRIVER_VERSION);
-
 	ret = i2c_add_driver(&aw20072_i2c_driver);
 	if (ret) {
 		pr_err("fail to add aw20072 device into i2c\n");
@@ -1044,13 +977,12 @@ static int __init aw20072_i2c_init(void)
 	return 0;
 }
 
-module_init(aw20072_i2c_init);
-
 static void __exit aw20072_i2c_exit(void)
 {
 	i2c_del_driver(&aw20072_i2c_driver);
 }
 
+module_init(aw20072_i2c_init);
 module_exit(aw20072_i2c_exit);
 
 MODULE_DESCRIPTION("AW20072 LED Driver");
