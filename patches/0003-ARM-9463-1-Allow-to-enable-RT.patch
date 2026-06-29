@@ -1,10 +1,16 @@
 From: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
-Date: Fri, 11 Oct 2019 13:14:29 +0200
-Subject: [PATCH v2 5/5] ARM: Allow to enable RT
+Date: Tue, 11 Nov 2025 16:54:38 +0100
+Subject: [PATCH 3/3] ARM: 9463/1: Allow to enable RT
+
+commit c6e61c06d6061750597e79c598acb5dead44c35b upstream.
 
 All known issues have been adressed.
 Allow to select RT.
 
+Acked-by: Linus Walleij <linus.walleij@linaro.org>
+Reviewed-by: Arnd Bergmann <arnd@arndb.de>
+Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+Signed-off-by: Russell King (Oracle) <rmk+kernel@armlinux.org.uk>
 Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
 ---
  arch/arm/Kconfig |    1 +
