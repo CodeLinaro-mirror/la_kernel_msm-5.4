@@ -134,6 +134,7 @@ struct fastrpc_invoke_ctx {
 	int tgid;
 	uint32_t sc;
 	uint32_t handle;
+	struct timespec64 invoke_start_time; /* submission timestamp for async perf */
 	uint32_t *crc;
 	struct fastrpc_perf *perf;
 	uint64_t *perf_kernel;
