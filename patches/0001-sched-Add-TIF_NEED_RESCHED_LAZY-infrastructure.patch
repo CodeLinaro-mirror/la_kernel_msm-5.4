@@ -50,7 +50,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -2023,7 +2023,8 @@ static inline void set_tsk_need_resched(
+@@ -2022,7 +2022,8 @@ static inline void set_tsk_need_resched(
  
  static inline void clear_tsk_need_resched(struct task_struct *tsk)
  {

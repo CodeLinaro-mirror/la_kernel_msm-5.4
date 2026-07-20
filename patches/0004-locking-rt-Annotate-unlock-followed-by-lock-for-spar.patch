@@ -16,18 +16,18 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
 
 --- a/kernel/locking/rtmutex.c
 +++ b/kernel/locking/rtmutex.c
-@@ -1604,6 +1604,7 @@ static int __sched rt_mutex_slowlock_blo
- 					   unsigned int state,
+@@ -1618,6 +1618,7 @@ static int __sched rt_mutex_slowlock_blo
  					   struct hrtimer_sleeper *timeout,
- 					   struct rt_mutex_waiter *waiter)
+ 					   struct rt_mutex_waiter *waiter,
+ 					   struct wake_q_head *wake_q)
 +	__releases(&lock->wait_lock) __acquires(&lock->wait_lock)
  {
  	struct rt_mutex *rtm = container_of(lock, struct rt_mutex, rtmutex);
  	struct task_struct *owner;
-@@ -1808,6 +1809,7 @@ static __always_inline int __rt_mutex_lo
-  * @lock:	The underlying RT mutex
+@@ -1837,6 +1838,7 @@ static __always_inline int __rt_mutex_lo
   */
- static void __sched rtlock_slowlock_locked(struct rt_mutex_base *lock)
+ static void __sched rtlock_slowlock_locked(struct rt_mutex_base *lock,
+ 					   struct wake_q_head *wake_q)
 +	__releases(&lock->wait_lock) __acquires(&lock->wait_lock)
  {
  	struct rt_mutex_waiter waiter;

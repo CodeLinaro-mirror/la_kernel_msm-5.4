@@ -61,13 +61,25 @@ tracing-Remove-TRACE_FLAG_IRQS_NOSUPPORT.patch
 ###########################################################################
 # ARM
 ###########################################################################
+# 56d97d3587b ("ARM: 9459/1: Disable jump-label on PREEMPT_RT")
 0001-arm-Disable-jump-label-on-PREEMPT_RT.patch
-ARM__enable_irq_in_translation_section_permission_fault_handlers.patch
+
+# 59e4f3b45b96a ("ARM: ensure interrupts are enabled in __do_user_fault()")
+0001-ARM-ensure-interrupts-are-enabled-in-__do_user_fault.patch
+
+# fedadc413723 ("ARM: 9461/1: Disable HIGHPTE on PREEMPT_RT kernels")
 arm-Disable-FAST_GUP-on-PREEMPT_RT-if-HIGHPTE-is-als.patch
+
+# f26bdbe1fa9f ("ARM: 9423/1: vfp: Provide vfp_state_hold() for VFP locking.")
+# b54cdbad4a39 ("ARM: 9424/1: vfp: Use vfp_state_hold() in vfp_sync_hwstate().")
+# 27035c23bad5 ("ARM: 9425/1: vfp: Use vfp_state_hold() in vfp_support_entry().")
+# c0b5195bad63 ("ARM: 9426/1: vfp: Move sending signals outside of vfp_state_hold()ed section.")
 0001-ARM-vfp-Provide-vfp_state_hold-for-VFP-locking.patch
 0002-ARM-vfp-Use-vfp_state_hold-in-vfp_sync_hwstate.patch
 0003-ARM-vfp-Use-vfp_state_hold-in-vfp_support_entry.patch
 0004-ARM-vfp-Move-sending-signals-outside-of-vfp_state_ho.patch
+
+# c6e61c06d606 ("ARM: 9463/1: Allow to enable RT")
 ARM__Allow_to_enable_RT.patch
 
 ###########################################################################

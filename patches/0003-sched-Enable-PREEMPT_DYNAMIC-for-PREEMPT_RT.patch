@@ -84,7 +84,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	default y if HAVE_PREEMPT_DYNAMIC_CALL
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -7462,11 +7462,13 @@ int preempt_dynamic_mode = preempt_dynam
+@@ -7467,11 +7467,13 @@ int preempt_dynamic_mode = preempt_dynam
  
  int sched_dynamic_mode(const char *str)
  {

@@ -136,7 +136,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  void resched_cpu(int cpu)
  {
  	struct rq *rq = cpu_rq(cpu);
-@@ -5627,6 +5656,10 @@ void sched_tick(void)
+@@ -5634,6 +5663,10 @@ void sched_tick(void)
  	update_rq_clock(rq);
  	hw_pressure = arch_scale_hw_pressure(cpu_of(rq));
  	update_hw_load_avg(rq_clock_task(rq), rq, hw_pressure);
@@ -147,7 +147,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	curr->sched_class->task_tick(rq, curr, 0);
  	if (sched_feat(LATENCY_WARN))
  		resched_latency = cpu_resched_latency(rq);
-@@ -7390,6 +7423,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
+@@ -7395,6 +7428,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
   *   preempt_schedule           <- NOP
   *   preempt_schedule_notrace   <- NOP
   *   irqentry_exit_cond_resched <- NOP
@@ -155,7 +155,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
   *
   * VOLUNTARY:
   *   cond_resched               <- __cond_resched
-@@ -7397,6 +7431,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
+@@ -7402,6 +7436,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
   *   preempt_schedule           <- NOP
   *   preempt_schedule_notrace   <- NOP
   *   irqentry_exit_cond_resched <- NOP
@@ -163,7 +163,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
   *
   * FULL:
   *   cond_resched               <- RET0
-@@ -7404,6 +7439,15 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
+@@ -7409,6 +7444,15 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
   *   preempt_schedule           <- preempt_schedule
   *   preempt_schedule_notrace   <- preempt_schedule_notrace
   *   irqentry_exit_cond_resched <- irqentry_exit_cond_resched
@@ -179,7 +179,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
   */
  
  enum {
-@@ -7411,6 +7455,7 @@ enum {
+@@ -7416,6 +7460,7 @@ enum {
  	preempt_dynamic_none,
  	preempt_dynamic_voluntary,
  	preempt_dynamic_full,
@@ -187,7 +187,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  };
  
  int preempt_dynamic_mode = preempt_dynamic_undefined;
-@@ -7426,15 +7471,23 @@ int sched_dynamic_mode(const char *str)
+@@ -7431,15 +7476,23 @@ int sched_dynamic_mode(const char *str)
  	if (!strcmp(str, "full"))
  		return preempt_dynamic_full;
  
@@ -213,7 +213,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  #else
  #error "Unsupported PREEMPT_DYNAMIC mechanism"
  #endif
-@@ -7454,6 +7507,7 @@ static void __sched_dynamic_update(int m
+@@ -7459,6 +7512,7 @@ static void __sched_dynamic_update(int m
  	preempt_dynamic_enable(preempt_schedule);
  	preempt_dynamic_enable(preempt_schedule_notrace);
  	preempt_dynamic_enable(irqentry_exit_cond_resched);
@@ -221,7 +221,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  
  	switch (mode) {
  	case preempt_dynamic_none:
-@@ -7463,6 +7517,7 @@ static void __sched_dynamic_update(int m
+@@ -7468,6 +7522,7 @@ static void __sched_dynamic_update(int m
  		preempt_dynamic_disable(preempt_schedule);
  		preempt_dynamic_disable(preempt_schedule_notrace);
  		preempt_dynamic_disable(irqentry_exit_cond_resched);
@@ -229,7 +229,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		if (mode != preempt_dynamic_mode)
  			pr_info("Dynamic Preempt: none\n");
  		break;
-@@ -7474,6 +7529,7 @@ static void __sched_dynamic_update(int m
+@@ -7479,6 +7534,7 @@ static void __sched_dynamic_update(int m
  		preempt_dynamic_disable(preempt_schedule);
  		preempt_dynamic_disable(preempt_schedule_notrace);
  		preempt_dynamic_disable(irqentry_exit_cond_resched);
@@ -237,7 +237,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		if (mode != preempt_dynamic_mode)
  			pr_info("Dynamic Preempt: voluntary\n");
  		break;
-@@ -7485,9 +7541,22 @@ static void __sched_dynamic_update(int m
+@@ -7490,9 +7546,22 @@ static void __sched_dynamic_update(int m
  		preempt_dynamic_enable(preempt_schedule);
  		preempt_dynamic_enable(preempt_schedule_notrace);
  		preempt_dynamic_enable(irqentry_exit_cond_resched);
@@ -260,7 +260,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	}
  
  	preempt_dynamic_mode = mode;
-@@ -7550,6 +7619,8 @@ static void __init preempt_dynamic_init(
+@@ -7555,6 +7624,8 @@ static void __init preempt_dynamic_init(
  			sched_dynamic_update(preempt_dynamic_none);
  		} else if (IS_ENABLED(CONFIG_PREEMPT_VOLUNTARY)) {
  			sched_dynamic_update(preempt_dynamic_voluntary);
@@ -269,7 +269,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		} else {
  			/* Default static call setting, nothing to do */
  			WARN_ON_ONCE(!IS_ENABLED(CONFIG_PREEMPT));
-@@ -7570,6 +7641,7 @@ static void __init preempt_dynamic_init(
+@@ -7575,6 +7646,7 @@ static void __init preempt_dynamic_init(
  PREEMPT_MODEL_ACCESSOR(none);
  PREEMPT_MODEL_ACCESSOR(voluntary);
  PREEMPT_MODEL_ACCESSOR(full);
@@ -314,7 +314,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		return;
  	}
  	/*
-@@ -8948,7 +8948,7 @@ static void check_preempt_wakeup_fair(st
+@@ -8939,7 +8939,7 @@ static void check_preempt_wakeup_fair(st
  	return;
  
  preempt:
@@ -325,7 +325,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  static struct task_struct *pick_task_fair(struct rq *rq)
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -2685,6 +2685,7 @@ extern void init_sched_rt_class(void);
+@@ -2710,6 +2710,7 @@ extern void init_sched_rt_class(void);
  extern void init_sched_fair_class(void);
  
  extern void resched_curr(struct rq *rq);
