@@ -1521,7 +1521,7 @@ const char *netdev_cmd_to_name(enum netdev_cmd cmd)
 	N(UDP_TUNNEL_DROP_INFO) N(CHANGE_TX_QUEUE_LEN)
 	N(CVLAN_FILTER_PUSH_INFO) N(CVLAN_FILTER_DROP_INFO)
 	N(SVLAN_FILTER_PUSH_INFO) N(SVLAN_FILTER_DROP_INFO)
-	N(PRE_CHANGEADDR)
+	N(PRE_CHANGEADDR) N(BR_JOIN) N(BR_LEAVE)
 	}
 #undef N
 	return "UNKNOWN_NETDEV_EVENT";
@@ -2807,6 +2807,7 @@ static u16 skb_tx_hash(const struct net_device *dev,
 	}
 
 	if (skb_rx_queue_recorded(skb)) {
+		BUILD_BUG_ON_INVALID(qcount == 0);
 		hash = skb_get_rx_queue(skb);
 		if (hash >= qoffset)
 			hash -= qoffset;
