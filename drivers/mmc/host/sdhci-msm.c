@@ -3,7 +3,7 @@
  * drivers/mmc/host/sdhci-msm.c - Qualcomm SDHCI Platform driver
  *
  * Copyright (c) 2013-2014,2020. The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/module.h>
@@ -4369,7 +4369,8 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	struct device_node *node = pdev->dev.of_node;
 	unsigned long flags;
 
-	if (of_property_read_bool(node, "non-removable") && !sdhci_qcom_read_boot_config(pdev)) {
+	if (of_property_read_bool(node, "non-removable") &&
+		!sdhci_qcom_read_boot_config(pdev)) {
 		dev_err(dev, "SDHCI is not boot dev.\n");
 		return 0;
 	}
@@ -4722,10 +4723,10 @@ pltfm_free:
 
 static int sdhci_msm_remove(struct platform_device *pdev)
 {
-	struct sdhci_host *host = platform_get_drvdata(pdev);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct sdhci_msm_host *msm_host = sdhci_pltfm_priv(pltfm_host);
-	struct sdhci_msm_qos_req *r = msm_host->sdhci_qos;
+	struct sdhci_host *host;
+	struct sdhci_pltfm_host *pltfm_host;
+	struct sdhci_msm_host *msm_host;
+	struct sdhci_msm_qos_req *r;
 	struct qos_cpu_group *qcg;
 	int i;
 	struct device_node *np = pdev->dev.of_node;
@@ -4856,7 +4857,7 @@ static int sdhci_msm_resume_early(struct device *dev)
 	struct device_node *np = dev->of_node;
 
 	if (of_property_read_bool(np, "non-removable") && !is_bootdevice_sdhci) {
-		dev_info(dev, "SDHCI is not boot dev.\n");
+		dev_err(dev, "SDHCI is not boot dev.\n");
 		return 0;
 	}
 
