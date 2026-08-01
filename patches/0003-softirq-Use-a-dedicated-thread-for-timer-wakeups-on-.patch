@@ -233,7 +233,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	__hrtimer_run_queues(cpu_base, now, flags, HRTIMER_ACTIVE_HARD);
 --- a/kernel/time/tick-sched.c
 +++ b/kernel/time/tick-sched.c
-@@ -865,7 +865,7 @@ static void tick_nohz_restart(struct tic
+@@ -866,7 +866,7 @@ static void tick_nohz_restart(struct tic
  
  static inline bool local_timer_softirq_pending(void)
  {
