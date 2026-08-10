@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  *
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #ifndef __VIRTIO_FASTRPC_CORE_H__
 #define __VIRTIO_FASTRPC_CORE_H__
@@ -139,6 +139,7 @@ struct fastrpc_invoke_ctx {
 	uint64_t *perf_kernel;
 	uint64_t *perf_dsp;
 	struct fastrpc_async_job asyncjob;
+	struct timespec64 invoke_start_time;  /* submission timestamp for async perf */
 };
 
 struct virt_msg_hdr {
