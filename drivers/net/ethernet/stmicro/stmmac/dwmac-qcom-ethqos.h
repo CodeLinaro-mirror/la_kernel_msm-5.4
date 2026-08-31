@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (c) 2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
-/*Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.*/
 #ifndef	_DWMAC_QCOM_ETHQOS_H
 #define	_DWMAC_QCOM_ETHQOS_H
 
 //#include <linux/msm-bus.h>
+#include <linux/interconnect.h>
 #include <linux/ipc_logging.h>
 
 extern void *ipc_emac_log_ctxt;
@@ -115,6 +116,69 @@ do  {\
 #define VOTE_IDX_10MBPS 1
 #define VOTE_IDX_100MBPS 2
 #define VOTE_IDX_1000MBPS 3
+#define EMAC_SPEED_PEAK_IDX 4
+
+struct emac_icc_data {
+	const char *name;
+	u32 average_bandwidth;
+	u32 peak_bandwidth;
+};
+
+static struct emac_icc_data emac_axi_icc_data[] = {
+	{
+		.name = "SPEED_0",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 0,
+	},
+	{
+		.name = "SPEED_10",
+		.average_bandwidth = 19200,
+		.peak_bandwidth = 19200,
+	},
+	{
+		.name = "SPEED_100",
+		.average_bandwidth = 192000,
+		.peak_bandwidth = 192000,
+	},
+	{
+		.name = "SPEED_1000",
+		.average_bandwidth = 1100000,
+		.peak_bandwidth = 1100000,
+	},
+	{
+		.name = "SPEED_peak",
+		.average_bandwidth = 13106400,
+		.peak_bandwidth = 13106400,
+	},
+};
+
+static struct emac_icc_data emac_apb_icc_data[] = {
+	{
+		.name = "SPEED_0",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 0,
+	},
+	{
+		.name = "SPEED_10",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 19200,
+	},
+	{
+		.name = "SPEED_100",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 192000,
+	},
+	{
+		.name = "SPEED_1000",
+		.average_bandwidth = 0,
+		.peak_bandwidth = 1100000,
+	},
+	{
+		.name = "SPEED_peak",
+		.average_bandwidth = 655320,
+		.peak_bandwidth = 655320,
+	},
+};
 #define RGMII_IO_MACRO_DEBUG1		0x20
 #define EMAC_SYSTEM_LOW_POWER_DEBUG	0x28
 
@@ -900,6 +964,8 @@ struct qcom_ethqos {
 	struct clk *rgmii_clk;
 	unsigned int speed;
 	unsigned int vote_idx;
+	struct icc_path *axi_icc_path;
+	struct icc_path *apb_icc_path;
 
 	struct iommu_domain *iommu_domain;
 	unsigned int *emac_reg_base_address;

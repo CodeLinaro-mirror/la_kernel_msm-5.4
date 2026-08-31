@@ -1209,6 +1209,31 @@ static int ethqos_configure_mac_v3(struct qcom_ethqos *ethqos)
 	return ret;
 }
 
+static void ethqos_set_icc_peak_vote(void *priv, bool is_peak)
+{
+	struct qcom_ethqos *ethqos = priv;
+	int idx;
+
+	if (is_peak)
+		idx = EMAC_SPEED_PEAK_IDX;
+	else
+		idx = ethqos->vote_idx;
+
+	/* Apply AXI bandwidth vote */
+	if (ethqos->axi_icc_path) {
+		icc_set_bw(ethqos->axi_icc_path,
+			   emac_axi_icc_data[idx].average_bandwidth,
+			   emac_axi_icc_data[idx].peak_bandwidth);
+	}
+
+	/* Apply APB bandwidth vote */
+	if (ethqos->apb_icc_path) {
+		icc_set_bw(ethqos->apb_icc_path,
+			   emac_apb_icc_data[idx].average_bandwidth,
+			   emac_apb_icc_data[idx].peak_bandwidth);
+	}
+}
+
 static void ethqos_fix_mac_speed(void *priv, unsigned int speed)
 {
 	struct qcom_ethqos *ethqos = priv;
@@ -4287,6 +4312,7 @@ static int _qcom_ethqos_probe(void *arg)
 	ethqos_set_func_clk_en(ethqos);
 
 	plat_dat->bsp_priv = ethqos;
+	plat_dat->set_icc_peak_vote = ethqos_set_icc_peak_vote;
 	plat_dat->fix_mac_speed = ethqos_fix_mac_speed;
 	plat_dat->tx_select_queue = dwmac_qcom_select_queue;
 	if (of_property_read_bool(pdev->dev.of_node,

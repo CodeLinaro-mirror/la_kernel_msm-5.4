@@ -89,10 +89,16 @@ static int stmmac_xgmac2_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 		& priv->hw->mii.clk_csr_mask;
 	value |= MII_XGMAC_SADDR | MII_XGMAC_READ;
 
+	/* Vote ICC SPEED_peak just for this MDIO transaction */
+	if (priv->plat->set_icc_peak_vote)
+		priv->plat->set_icc_peak_vote(priv->plat->bsp_priv, 1);
+
 	/* Wait until any existing MII operation is complete */
 	if (readl_poll_timeout(priv->ioaddr + mii_data, tmp,
-			       !(tmp & MII_XGMAC_BUSY), 100, 10000))
-		return -EBUSY;
+			       !(tmp & MII_XGMAC_BUSY), 100, 10000)) {
+		ret = -EBUSY;
+		goto out_unvote;
+	}
 
 	/* Set the MII address register to read */
 	writel(addr, priv->ioaddr + mii_address);
@@ -100,11 +106,19 @@ static int stmmac_xgmac2_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 
 	/* Wait until any existing MII operation is complete */
 	if (readl_poll_timeout(priv->ioaddr + mii_data, tmp,
-			       !(tmp & MII_XGMAC_BUSY), 100, 10000))
-		return -EBUSY;
+			       !(tmp & MII_XGMAC_BUSY), 100, 10000)) {
+		ret = -EBUSY;
+		goto out_unvote;
+	}
 
 	/* Read the data from the MII data register */
-	return readl(priv->ioaddr + mii_data) & GENMASK(15, 0);
+	ret = readl(priv->ioaddr + mii_data) & GENMASK(15, 0);
+
+out_unvote:
+	if (priv->plat->set_icc_peak_vote)
+		priv->plat->set_icc_peak_vote(priv->plat->bsp_priv, 0);
+
+	return ret;
 }
 
 static int stmmac_xgmac2_mdio_write(struct mii_bus *bus, int phyaddr,
@@ -130,18 +144,30 @@ static int stmmac_xgmac2_mdio_write(struct mii_bus *bus, int phyaddr,
 	value |= phydata | MII_XGMAC_SADDR;
 	value |= MII_XGMAC_WRITE;
 
+	/* Vote ICC SPEED_peak just for this MDIO transaction */
+	if (priv->plat->set_icc_peak_vote)
+		priv->plat->set_icc_peak_vote(priv->plat->bsp_priv, 1);
+
 	/* Wait until any existing MII operation is complete */
 	if (readl_poll_timeout(priv->ioaddr + mii_data, tmp,
-			       !(tmp & MII_XGMAC_BUSY), 100, 10000))
-		return -EBUSY;
+			       !(tmp & MII_XGMAC_BUSY), 100, 10000)) {
+		ret = -EBUSY;
+		goto out_unvote;
+	}
 
 	/* Set the MII address register to write */
 	writel(addr, priv->ioaddr + mii_address);
 	writel(value, priv->ioaddr + mii_data);
 
 	/* Wait until any existing MII operation is complete */
-	return readl_poll_timeout(priv->ioaddr + mii_data, tmp,
-				  !(tmp & MII_XGMAC_BUSY), 100, 10000);
+	ret = readl_poll_timeout(priv->ioaddr + mii_data, tmp,
+				 !(tmp & MII_XGMAC_BUSY), 100, 10000);
+
+out_unvote:
+	if (priv->plat->set_icc_peak_vote)
+		priv->plat->set_icc_peak_vote(priv->plat->bsp_priv, 0);
+
+	return ret;
 }
 
 /**
