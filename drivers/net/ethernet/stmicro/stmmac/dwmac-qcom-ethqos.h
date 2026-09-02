@@ -964,8 +964,6 @@ struct qcom_ethqos {
 	struct clk *rgmii_clk;
 	unsigned int speed;
 	unsigned int vote_idx;
-	struct icc_path *axi_icc_path;
-	struct icc_path *apb_icc_path;
 
 	struct iommu_domain *iommu_domain;
 	unsigned int *emac_reg_base_address;
@@ -1081,6 +1079,11 @@ struct qcom_ethqos {
 	unsigned long action;
 	bool driver_load_fail;
 	bool skip_ipa_autoresume;
+
+	struct icc_path *axi_icc_path;
+	struct emac_icc_data *emac_axi_icc;
+	struct icc_path *apb_icc_path;
+	struct emac_icc_data *emac_apb_icc;
 };
 
 struct pps_cfg {

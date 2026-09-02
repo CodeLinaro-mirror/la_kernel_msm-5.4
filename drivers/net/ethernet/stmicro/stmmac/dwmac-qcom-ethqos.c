@@ -4423,6 +4423,22 @@ static int _qcom_ethqos_probe(void *arg)
 	ethqos_update_mdio_drv_strength(ethqos, np);
 	ethqos_mac_rec_init(ethqos);
 
+	ethqos->axi_icc_path = of_icc_get(&pdev->dev, "axi_icc_path");
+	if (!ethqos->axi_icc_path || IS_ERR(ethqos->axi_icc_path)) {
+		ETHQOSERR("Interconnect not found for Emac->Axi path\n");
+		ethqos->emac_axi_icc = NULL;
+	} else {
+		ethqos->emac_axi_icc = emac_axi_icc_data;
+	}
+
+	ethqos->apb_icc_path = of_icc_get(&pdev->dev, "apb_icc_path");
+	if (!ethqos->apb_icc_path || IS_ERR(ethqos->apb_icc_path)) {
+		ETHQOSERR("Interconnect not found for Emac->Apb path\n");
+		ethqos->emac_apb_icc = NULL;
+	} else {
+		ethqos->emac_apb_icc = emac_apb_icc_data;
+	}
+
 	ret = stmmac_dvr_probe(&pdev->dev, plat_dat, &stmmac_res);
 	if (ret)
 		goto err_clk;
