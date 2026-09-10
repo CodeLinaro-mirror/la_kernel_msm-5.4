@@ -51,6 +51,7 @@ int open_not_called;
 #define PHY_LOOPBACK_10 0x4100
 
 #define L3_L4_Rx_Filter_Chan_Num 2
+#define EMAC_SPEED_PEAK_IDX 7
 
 static void ethqos_rgmii_io_macro_loopback(struct qcom_ethqos *ethqos,
 					   int mode);
@@ -1576,6 +1577,31 @@ static int ethqos_configure_mac_v3(struct qcom_ethqos *ethqos)
 	ret = ethqos_rgmii_macro_init_v3(ethqos);
 
 	return ret;
+}
+
+static void ethqos_set_icc_peak_vote(void *priv, bool is_peak)
+{
+	struct qcom_ethqos *ethqos = priv;
+	int idx;
+
+	if (is_peak)
+		idx = EMAC_SPEED_PEAK_IDX;
+	else
+		idx = ethqos->vote_idx;
+
+	/* Apply AXI bandwidth vote */
+	if (ethqos->axi_icc_path && ethqos->emac_axi_icc) {
+		icc_set_bw(ethqos->axi_icc_path,
+			   ethqos->emac_axi_icc[idx].average_bandwidth,
+			   ethqos->emac_axi_icc[idx].peak_bandwidth);
+	}
+
+	/* Apply APB bandwidth vote */
+	if (ethqos->apb_icc_path && ethqos->emac_apb_icc) {
+		icc_set_bw(ethqos->apb_icc_path,
+			   ethqos->emac_apb_icc[idx].average_bandwidth,
+			   ethqos->emac_apb_icc[idx].peak_bandwidth);
+	}
 }
 
 static void ethqos_fix_mac_speed(void *priv, unsigned int speed)
@@ -4615,6 +4641,7 @@ static int _qcom_ethqos_probe(void *arg)
 	ethqos_set_func_clk_en(ethqos);
 
 	plat_dat->bsp_priv = ethqos;
+	plat_dat->set_icc_peak_vote = ethqos_set_icc_peak_vote;
 	plat_dat->fix_mac_speed = ethqos_fix_mac_speed;
 	plat_dat->tx_select_queue = dwmac_qcom_select_queue;
 	plat_dat->has_gmac4 = 1;
