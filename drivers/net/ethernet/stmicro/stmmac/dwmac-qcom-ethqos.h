@@ -924,6 +924,11 @@ static struct emac_icc_data emac_axi_icc_data[] = {
 		.average_bandwidth = 1100000,
 		.peak_bandwidth = 1100000,
 	},
+	{
+		.name = "SPEED_peak",
+		.average_bandwidth = 13106400,
+		.peak_bandwidth = 13106400,
+	},
 };
 
 static struct emac_icc_data emac_apb_icc_data[] = {
@@ -961,6 +966,11 @@ static struct emac_icc_data emac_apb_icc_data[] = {
 		.name = "SPEED_10Gbps",
 		.average_bandwidth = 0,
 		.peak_bandwidth = 1100000,
+	},
+	{
+		.name = "SPEED_peak",
+		.average_bandwidth = 655320,
+		.peak_bandwidth = 655320,
 	},
 };
 

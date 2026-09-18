@@ -181,19 +181,31 @@ static int stmmac_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 		}
 	}
 
+	/* Vote ICC SPEED_peak just for this MDIO transaction */
+	if (priv->plat->set_icc_peak_vote)
+		priv->plat->set_icc_peak_vote(priv->plat->bsp_priv, 1);
+
 	if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
-			       100, 10000))
-		return -EBUSY;
+			       100, 10000)) {
+		data = -EBUSY;
+		goto out_unvote;
+	}
 
 	writel(data, priv->ioaddr + mii_data);
 	writel(value, priv->ioaddr + mii_address);
 
 	if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
-			       100, 10000))
-		return -EBUSY;
+			       100, 10000)) {
+		data = -EBUSY;
+		goto out_unvote;
+	}
 
 	/* Read the data from the MII data register */
 	data = (int)readl(priv->ioaddr + mii_data) & MII_DATA_MASK;
+
+out_unvote:
+	if (priv->plat->set_icc_peak_vote)
+		priv->plat->set_icc_peak_vote(priv->plat->bsp_priv, 0);
 
 	return data;
 }
@@ -239,18 +251,29 @@ static int stmmac_mdio_write(struct mii_bus *bus, int phyaddr, int phyreg,
 		value |= MII_WRITE;
 	}
 
+	/* Vote ICC SPEED_peak just for this MDIO transaction */
+	if (priv->plat->set_icc_peak_vote)
+		priv->plat->set_icc_peak_vote(priv->plat->bsp_priv, 1);
+
 	/* Wait until any existing MII operation is complete */
 	if (readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
-			       100, 10000))
-		return -EBUSY;
+			       100, 10000)) {
+		data = -EBUSY;
+		goto out_unvote;
+	}
 
 	/* Set the MII address register to write */
 	writel(data, priv->ioaddr + mii_data);
 	writel(value, priv->ioaddr + mii_address);
 
 	/* Wait until any existing MII operation is complete */
-	return readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
-				  100, 10000);
+	data = readl_poll_timeout(priv->ioaddr + mii_address, v, !(v & MII_BUSY),
+			       100, 10000);
+out_unvote:
+	if (priv->plat->set_icc_peak_vote)
+		priv->plat->set_icc_peak_vote(priv->plat->bsp_priv, 0);
+
+	return data;
 }
 
 /**
