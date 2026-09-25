@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2010-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/devfreq_cooling.h>
@@ -812,10 +813,6 @@ int kgsl_pwrscale_init(struct kgsl_device *device, struct platform_device *pdev,
 	gpu_profile->profile.max_state = pwr->num_pwrlevels;
 	/* link storage array to the devfreq profile pointer */
 	gpu_profile->profile.freq_table = pwrscale->freq_table;
-
-	/* if there is only 1 freq, no point in running a governor */
-	if (gpu_profile->profile.max_state == 1)
-		governor = "performance";
 
 	/* initialize msm-adreno-tz governor specific data here */
 	adreno_tz_data.disable_busy_time_burst =
