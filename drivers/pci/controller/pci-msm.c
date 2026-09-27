@@ -3340,6 +3340,22 @@ static int msm_pcie_clk_init(struct msm_pcie_dev_t *dev)
 			/* add a 1ms delay to ensure the reset is asserted */
 			usleep_range(1000, 1005);
 
+			if (strnstr(reset_info->name, "phy_reset",
+						strlen(reset_info->name))) {
+				if (dev->gdsc_phy) {
+					rc = regulator_enable(dev->gdsc_phy);
+					if (rc) {
+						PCIE_ERR(dev,
+							"PCIe: fail to enable GDSC-PHY for RC%d (%s)\n",
+								dev->rc_idx, dev->pdev->name);
+						return rc;
+					}
+					PCIE_DBG2(dev,
+						"PCIe: Successfully enabled GDSC-PHY for RC%d (%s)\n",
+							dev->rc_idx, dev->pdev->name);
+				}
+			}
+
 			rc = reset_control_deassert(reset_info->hdl);
 			if (rc)
 				PCIE_ERR(dev,
