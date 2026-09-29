@@ -49,6 +49,7 @@
 #define POWER_ON_RETRY_MAX_TIMES        4
 #endif
 #define POWER_ON_RETRY_DELAY_MS         500
+#define POWER_RESET_MIN_DELAY_MS	100
 #define CNSS_FS_NAME			"cnss"
 #define CNSS_FS_NAME_SIZE		15
 #define CNSS_DEVICE_NAME_SIZE		16
@@ -523,6 +524,7 @@ struct cnss_plat_data {
 	int qrtr_node_id;
 	unsigned int wlfw_service_instance_id;
 	const char *pld_bus_ops_name;
+	u32 bdf_dnld_fail_count;
 };
 
 #ifdef CONFIG_ARCH_QCOM
