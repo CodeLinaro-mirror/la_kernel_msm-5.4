@@ -124,3 +124,10 @@ config CNSS2_ENUM_WITH_LOW_SPEED
 	help
 	Set link target speed to Gen1 before enum, and then restore default
 	RC speed to re-establish link speed. For Genoa chip, needn't restore.
+
+config CNSS2_BDF_RETRY
+	bool "Enable BDF segment retry on QMI download failure"
+	depends on CNSS2
+	help
+	  Retry failed BDF QMI download segments before giving up.
+	  Enable for platforms that require this recovery.
