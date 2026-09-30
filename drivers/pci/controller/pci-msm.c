@@ -747,6 +747,7 @@ struct msm_pcie_dev_t {
 	struct platform_device *pdev;
 	struct pci_dev *dev;
 	struct regulator *gdsc;
+	struct regulator *gdsc_phy;
 	struct msm_pcie_vreg_info_t vreg[MSM_PCIE_MAX_VREG];
 	struct msm_pcie_gpio_info_t gpio[MSM_PCIE_MAX_GPIO];
 	struct msm_pcie_clk_info_t clk[MSM_PCIE_MAX_CLK];
@@ -3313,6 +3314,8 @@ static int msm_pcie_clk_init(struct msm_pcie_dev_t *dev)
 		if (dev->pipe_clk_mux && dev->ref_clk_src)
 			clk_set_parent(dev->pipe_clk_mux, dev->ref_clk_src);
 
+		if (dev->gdsc_phy)
+			regulator_disable(dev->gdsc_phy);
 		regulator_disable(dev->gdsc);
 	}
 
@@ -3384,8 +3387,11 @@ static void msm_pcie_clk_deinit(struct msm_pcie_dev_t *dev)
 	if (dev->pipe_clk_mux && dev->ref_clk_src)
 		clk_set_parent(dev->pipe_clk_mux, dev->ref_clk_src);
 
-	if (!dev->nogdsc_retention)
+	if (!dev->nogdsc_retention) {
+		if (dev->gdsc_phy)
+			regulator_disable(dev->gdsc_phy);
 		regulator_disable(dev->gdsc);
+	}
 
 	PCIE_DBG(dev, "RC%d: exit\n", dev->rc_idx);
 }
@@ -3971,6 +3977,20 @@ static int msm_pcie_get_vreg(struct msm_pcie_dev_t *pcie_dev)
 			PCIE_DBG(pcie_dev, "PCIe: EPROBE_DEFER for %s GDSC\n",
 				pdev->name);
 		return PTR_ERR(pcie_dev->gdsc);
+	}
+
+	pcie_dev->gdsc_phy = devm_regulator_get(&pdev->dev, "gdsc-phy-vdd");
+
+	if (IS_ERR(pcie_dev->gdsc_phy)) {
+		PCIE_ERR(pcie_dev, "PCIe: RC%d: Failed to get %s GDSC-PHY:%ld\n",
+			 pcie_dev->rc_idx, pdev->name,
+			 PTR_ERR(pcie_dev->gdsc_phy));
+		if (PTR_ERR(pcie_dev->gdsc_phy) == -EPROBE_DEFER) {
+			PCIE_DBG(pcie_dev, "PCIe: EPROBE_DEFER for %s GDSC-PHY\n",
+				 pdev->name);
+			return PTR_ERR(pcie_dev->gdsc_phy);
+		}
+		pcie_dev->gdsc_phy = NULL;
 	}
 
 	return 0;
@@ -7964,8 +7984,11 @@ static int msm_pcie_drv_suspend(struct msm_pcie_dev_t *pcie_dev,
 				pcie_dev->rc_idx, ret);
 	}
 
-	if (!pcie_dev->gdsc_clk_drv_ss_nonvotable)
+	if (!pcie_dev->gdsc_clk_drv_ss_nonvotable) {
+		if (pcie_dev->gdsc_phy)
+			regulator_disable(pcie_dev->gdsc_phy);
 		regulator_disable(pcie_dev->gdsc);
+	}
 
 	msm_pcie_vreg_deinit(pcie_dev);
 
