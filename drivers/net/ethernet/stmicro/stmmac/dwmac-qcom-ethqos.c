@@ -5067,6 +5067,57 @@ static enum stall_status ethqos_rx_sw_stall_status(struct health_monitor *old,
 	return NO_STALL;
 }
 
+static void ethqos_dump_dma_stats(struct qcom_ethqos *ethqos)
+{
+	struct health_monitor *old_hm_stats;
+	struct health_monitor *new_hm_stats;
+	int i;
+
+	if (!ethqos)
+		return;
+
+	old_hm_stats = ethqos->old_hm_stats;
+	new_hm_stats = ethqos->new_hm_stats;
+
+	if (!old_hm_stats || !new_hm_stats)
+		return;
+
+	for (i = 0; i < 2; i++) {
+		if (!old_hm_stats->tx_dma_stats[i] || !new_hm_stats->tx_dma_stats[i])
+			continue;
+		ETHQOSDBG("TX_CH%d: chan_num=%u old[head=0x%llx cur=0x%llx tail=0x%llx ring_len=%u] "
+			"new[head=0x%llx cur=0x%llx tail=0x%llx ring_len=%u]\n",
+			i, new_hm_stats->tx_dma_stats[i]->channel_number,
+			(u64)old_hm_stats->tx_dma_stats[i]->head_pointer,
+			(u64)old_hm_stats->tx_dma_stats[i]->current_pointer,
+			(u64)old_hm_stats->tx_dma_stats[i]->tail_pointer,
+			old_hm_stats->tx_dma_stats[i]->ring_length,
+			(u64)new_hm_stats->tx_dma_stats[i]->head_pointer,
+			(u64)new_hm_stats->tx_dma_stats[i]->current_pointer,
+			(u64)new_hm_stats->tx_dma_stats[i]->tail_pointer,
+			new_hm_stats->tx_dma_stats[i]->ring_length);
+	}
+
+	for (i = 0; i < 3; i++) {
+		if (!old_hm_stats->rx_dma_stats[i] || !new_hm_stats->rx_dma_stats[i])
+			continue;
+		ETHQOSDBG("RX_CH%d: chan_num=%u old[head=0x%llx cur=0x%llx tail=0x%llx ring_len=%u] "
+			"new[head=0x%llx cur=0x%llx tail=0x%llx ring_len=%u]\n",
+			i, new_hm_stats->rx_dma_stats[i]->channel_number,
+			(u64)old_hm_stats->rx_dma_stats[i]->head_pointer,
+			(u64)old_hm_stats->rx_dma_stats[i]->current_pointer,
+			(u64)old_hm_stats->rx_dma_stats[i]->tail_pointer,
+			old_hm_stats->rx_dma_stats[i]->ring_length,
+			(u64)new_hm_stats->rx_dma_stats[i]->head_pointer,
+			(u64)new_hm_stats->rx_dma_stats[i]->current_pointer,
+			(u64)new_hm_stats->rx_dma_stats[i]->tail_pointer,
+			new_hm_stats->rx_dma_stats[i]->ring_length);
+	}
+
+	ETHQOSDBG("dma_debug: old=0x%x new=0x%x\n",
+		old_hm_stats->dma_debug_status0, new_hm_stats->dma_debug_status0);
+}
+
 static unsigned int ethqos_get_stall_status_bits(struct qcom_ethqos *ethqos, bool use_l3_l4_filters,
 			bool ipa_offload_suspended)
 {
@@ -5100,25 +5151,116 @@ static unsigned int ethqos_get_stall_status_bits(struct qcom_ethqos *ethqos, boo
 	{
 		status_bits |= STATUS_MAC_HW_STALLED;
 		ethqos->hm_counters->mac_hw_stall_count++;
+		ETHQOSDBG("MAC_HW_STALLED: tx_hw=%d tx_sw=%d rx_hw=%d rx_sw=%d count=%lu "
+			"old[mmc_tx=%u mmc_rx=%u tx_ch0_cur=0x%llx tx_ch1_cur=0x%llx "
+			"rx_ch0_cur=0x%llx rx_ch1_cur=0x%llx rx_ch2_cur=0x%llx "
+			"tx_pkt_n=%u rx_pkt_n=%u tx_pkt_nw=%u dma_debug=0x%x] "
+			"new[mmc_tx=%u mmc_rx=%u tx_ch0_cur=0x%llx tx_ch1_cur=0x%llx "
+			"rx_ch0_cur=0x%llx rx_ch1_cur=0x%llx rx_ch2_cur=0x%llx "
+			"tx_pkt_n=%u rx_pkt_n=%u tx_pkt_nw=%u dma_debug=0x%x]\n",
+			tx_hw_status, tx_sw_status, rx_hw_status, rx_sw_status,
+			ethqos->hm_counters->mac_hw_stall_count,
+			ethqos->old_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb,
+			ethqos->old_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb,
+			(u64)ethqos->old_hm_stats->tx_dma_stats[0]->current_pointer,
+			(u64)ethqos->old_hm_stats->tx_dma_stats[1]->current_pointer,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[0]->current_pointer,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[1]->current_pointer,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[2]->current_pointer,
+			ethqos->old_hm_stats->sw_path_dvr_stats->tx_pkt_n,
+			ethqos->old_hm_stats->sw_path_dvr_stats->rx_pkt_n,
+			ethqos->old_hm_stats->sw_path_dvr_stats->tx_pkt_nw_stack,
+			ethqos->old_hm_stats->dma_debug_status0,
+			ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb,
+			ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb,
+			(u64)ethqos->new_hm_stats->tx_dma_stats[0]->current_pointer,
+			(u64)ethqos->new_hm_stats->tx_dma_stats[1]->current_pointer,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[0]->current_pointer,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[1]->current_pointer,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[2]->current_pointer,
+			ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_n,
+			ethqos->new_hm_stats->sw_path_dvr_stats->rx_pkt_n,
+			ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_nw_stack,
+			ethqos->new_hm_stats->dma_debug_status0);
 	}
 
 	if (ethqos_is_hw_path_stalled(tx_hw_status, rx_hw_status))
 	{
 		status_bits |= STATUS_HW_PATH_STALLED;
 		ethqos->hm_counters->hw_path_stall_count++;
+		ETHQOSDBG("HW_PATH_STALLED: tx_hw=%d rx_hw=%d count=%lu "
+			"old[mmc_tx=%u mmc_rx=%u tx_ch0_cur=0x%llx tx_ch1_cur=0x%llx "
+			"rx_ch0_cur=0x%llx rx_ch1_cur=0x%llx rx_ch2_cur=0x%llx dma_debug=0x%x] "
+			"new[mmc_tx=%u mmc_rx=%u tx_ch0_cur=0x%llx tx_ch1_cur=0x%llx "
+			"rx_ch0_cur=0x%llx rx_ch1_cur=0x%llx rx_ch2_cur=0x%llx dma_debug=0x%x]\n",
+			tx_hw_status, rx_hw_status, ethqos->hm_counters->hw_path_stall_count,
+			ethqos->old_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb,
+			ethqos->old_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb,
+			(u64)ethqos->old_hm_stats->tx_dma_stats[0]->current_pointer,
+			(u64)ethqos->old_hm_stats->tx_dma_stats[1]->current_pointer,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[0]->current_pointer,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[1]->current_pointer,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[2]->current_pointer,
+			ethqos->old_hm_stats->dma_debug_status0,
+			ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb,
+			ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb,
+			(u64)ethqos->new_hm_stats->tx_dma_stats[0]->current_pointer,
+			(u64)ethqos->new_hm_stats->tx_dma_stats[1]->current_pointer,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[0]->current_pointer,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[1]->current_pointer,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[2]->current_pointer,
+			ethqos->new_hm_stats->dma_debug_status0);
 	}
 
 	if (ethqos_is_sw_tx_path_stalled(tx_sw_status))
 	{
 		status_bits |= STATUS_SW_TX_STALLED;
 		ethqos->hm_counters->sw_tx_path_stall_count++;
+		ETHQOSDBG("SW_TX_PATH_STALLED: tx_sw=%d count=%lu "
+			"old[tx_pkt_n=%u tx_pkt_nw=%u tx_ch0_cur=0x%llx tx_ch1_cur=0x%llx "
+			"mmc_tx=%u dma_debug=0x%x] "
+			"new[tx_pkt_n=%u tx_pkt_nw=%u tx_ch0_cur=0x%llx tx_ch1_cur=0x%llx "
+			"mmc_tx=%u dma_debug=0x%x]\n",
+			tx_sw_status, ethqos->hm_counters->sw_tx_path_stall_count,
+			ethqos->old_hm_stats->sw_path_dvr_stats->tx_pkt_n,
+			ethqos->old_hm_stats->sw_path_dvr_stats->tx_pkt_nw_stack,
+			(u64)ethqos->old_hm_stats->tx_dma_stats[0]->current_pointer,
+			(u64)ethqos->old_hm_stats->tx_dma_stats[1]->current_pointer,
+			ethqos->old_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb,
+			ethqos->old_hm_stats->dma_debug_status0,
+			ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_n,
+			ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_nw_stack,
+			(u64)ethqos->new_hm_stats->tx_dma_stats[0]->current_pointer,
+			(u64)ethqos->new_hm_stats->tx_dma_stats[1]->current_pointer,
+			ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_tx_octetcount_gb,
+			ethqos->new_hm_stats->dma_debug_status0);
 	}
 
 	if (ethqos_is_sw_rx_path_stalled(rx_sw_status))
 	{
 		status_bits |= STATUS_SW_RX_STALLED;
 		ethqos->hm_counters->sw_rx_path_stall_count++;
+		ETHQOSDBG("SW_RX_PATH_STALLED: rx_sw=%d count=%lu "
+			"old[rx_pkt_n=%u rx_ch0_cur=0x%llx rx_ch1_cur=0x%llx rx_ch2_cur=0x%llx "
+			"mmc_rx=%u dma_debug=0x%x] "
+			"new[rx_pkt_n=%u rx_ch0_cur=0x%llx rx_ch1_cur=0x%llx rx_ch2_cur=0x%llx "
+			"mmc_rx=%u dma_debug=0x%x]\n",
+			rx_sw_status, ethqos->hm_counters->sw_rx_path_stall_count,
+			ethqos->old_hm_stats->sw_path_dvr_stats->rx_pkt_n,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[0]->current_pointer,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[1]->current_pointer,
+			(u64)ethqos->old_hm_stats->rx_dma_stats[2]->current_pointer,
+			ethqos->old_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb,
+			ethqos->old_hm_stats->dma_debug_status0,
+			ethqos->new_hm_stats->sw_path_dvr_stats->rx_pkt_n,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[0]->current_pointer,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[1]->current_pointer,
+			(u64)ethqos->new_hm_stats->rx_dma_stats[2]->current_pointer,
+			ethqos->new_hm_stats->cm_hw_stats->mmc_cnts->mmc_rx_octetcount_gb,
+			ethqos->new_hm_stats->dma_debug_status0);
 	}
+	if (status_bits)
+		ethqos_dump_dma_stats(ethqos);
 
 	return status_bits;
 }
