@@ -5123,6 +5123,7 @@ static unsigned int ethqos_get_stall_status_bits(struct qcom_ethqos *ethqos, boo
 {
 	unsigned int status_bits = 0;
 	enum stall_status tx_hw_status, tx_sw_status, rx_hw_status, rx_sw_status;
+	bool mac_hw_stalled;
 
 	tx_hw_status = ethqos_tx_hw_stall_status(ethqos->old_hm_stats, ethqos->new_hm_stats);
 	tx_sw_status = ethqos_tx_sw_stall_status(ethqos->old_hm_stats, ethqos->new_hm_stats);
@@ -5147,7 +5148,9 @@ static unsigned int ethqos_get_stall_status_bits(struct qcom_ethqos *ethqos, boo
 		rx_sw_status = RX_SW_PATH_STALLED;
 	}
 
-	if (ethqos_is_mac_hw_stalled(tx_hw_status, tx_sw_status, rx_hw_status, rx_sw_status))
+	mac_hw_stalled = ethqos_is_mac_hw_stalled(tx_hw_status, tx_sw_status,
+			rx_hw_status, rx_sw_status);
+	if (mac_hw_stalled)
 	{
 		status_bits |= STATUS_MAC_HW_STALLED;
 		ethqos->hm_counters->mac_hw_stall_count++;
@@ -5182,6 +5185,7 @@ static unsigned int ethqos_get_stall_status_bits(struct qcom_ethqos *ethqos, boo
 			ethqos->new_hm_stats->sw_path_dvr_stats->rx_pkt_n,
 			ethqos->new_hm_stats->sw_path_dvr_stats->tx_pkt_nw_stack,
 			ethqos->new_hm_stats->dma_debug_status0);
+		return status_bits;
 	}
 
 	if (ethqos_is_hw_path_stalled(tx_hw_status, rx_hw_status))
