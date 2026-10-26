@@ -2523,6 +2523,8 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 	void *ptr = adreno_dev->pwrup_reglist->hostptr;
 	struct cpu_gpu_lock *lock = ptr;
 	u32 *data = ptr + sizeof(*lock);
+	u64 reglist_size_dwords = adreno_dev->pwrup_reglist->size / sizeof(u32);
+	u64 lock_size_dwords = sizeof(*lock) / sizeof(u32);
 	int i, offset = 0;
 	u32 pending_pairs = 2; /* No of pairs to add: <select,value> and <cntl,1> */
 
@@ -2549,8 +2551,8 @@ int a6xx_perfcounter_update(struct adreno_device *adreno_dev,
 	}
 
 	/* Ensure there is enough space in the reglist buffer for new pairs */
-	if ((offset + (pending_pairs * 2)) >=
-		(adreno_dev->pwrup_reglist->size / sizeof(u32))) {
+	if ((offset + (pending_pairs * 2) + lock_size_dwords) >=
+		reglist_size_dwords) {
 		cpu_gpu_unlock(lock);
 		return -ENOSPC;
 	}
