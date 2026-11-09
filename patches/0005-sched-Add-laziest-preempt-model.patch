@@ -73,7 +73,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  config PREEMPT_RT
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -1117,13 +1117,22 @@ void resched_curr(struct rq *rq)
+@@ -1128,13 +1128,22 @@ void resched_curr(struct rq *rq)
  
  #ifdef CONFIG_PREEMPT_DYNAMIC
  static DEFINE_STATIC_KEY_FALSE(sk_dynamic_preempt_lazy);
@@ -96,7 +96,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	return IS_ENABLED(PREEMPT_LAZY);
  }
  #endif
-@@ -5665,7 +5674,7 @@ void sched_tick(void)
+@@ -5676,7 +5685,7 @@ void sched_tick(void)
  	hw_pressure = arch_scale_hw_pressure(cpu_of(rq));
  	update_hw_load_avg(rq_clock_task(rq), rq, hw_pressure);
  
@@ -105,7 +105,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		resched_curr(rq);
  
  	curr->sched_class->task_tick(rq, curr, 0);
-@@ -7430,6 +7439,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
+@@ -7466,6 +7475,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
   *   preempt_schedule_notrace   <- NOP
   *   irqentry_exit_cond_resched <- NOP
   *   dynamic_preempt_lazy       <- false
@@ -113,7 +113,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
   *
   * VOLUNTARY:
   *   cond_resched               <- __cond_resched
-@@ -7438,6 +7448,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
+@@ -7474,6 +7484,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
   *   preempt_schedule_notrace   <- NOP
   *   irqentry_exit_cond_resched <- NOP
   *   dynamic_preempt_lazy       <- false
@@ -121,7 +121,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
   *
   * FULL:
   *   cond_resched               <- RET0
-@@ -7446,6 +7457,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
+@@ -7482,6 +7493,7 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
   *   preempt_schedule_notrace   <- preempt_schedule_notrace
   *   irqentry_exit_cond_resched <- irqentry_exit_cond_resched
   *   dynamic_preempt_lazy       <- false
@@ -129,7 +129,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
   *
   * LAZY:
   *   cond_resched               <- RET0
-@@ -7454,6 +7466,16 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
+@@ -7490,6 +7502,16 @@ EXPORT_SYMBOL(__cond_resched_rwlock_writ
   *   preempt_schedule_notrace   <- preempt_schedule_notrace
   *   irqentry_exit_cond_resched <- irqentry_exit_cond_resched
   *   dynamic_preempt_lazy       <- true
@@ -146,7 +146,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
   */
  
  enum {
-@@ -7462,6 +7484,7 @@ enum {
+@@ -7498,6 +7520,7 @@ enum {
  	preempt_dynamic_voluntary,
  	preempt_dynamic_full,
  	preempt_dynamic_lazy,
@@ -154,7 +154,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  };
  
  int preempt_dynamic_mode = preempt_dynamic_undefined;
-@@ -7482,6 +7505,9 @@ int sched_dynamic_mode(const char *str)
+@@ -7518,6 +7541,9 @@ int sched_dynamic_mode(const char *str)
  #ifdef CONFIG_ARCH_HAS_PREEMPT_LAZY
  	if (!strcmp(str, "lazy"))
  		return preempt_dynamic_lazy;
@@ -164,7 +164,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  #endif
  
  	return -EINVAL;
-@@ -7516,6 +7542,7 @@ static void __sched_dynamic_update(int m
+@@ -7552,6 +7578,7 @@ static void __sched_dynamic_update(int m
  	preempt_dynamic_enable(preempt_schedule_notrace);
  	preempt_dynamic_enable(irqentry_exit_cond_resched);
  	preempt_dynamic_key_disable(preempt_lazy);
@@ -172,7 +172,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  
  	switch (mode) {
  	case preempt_dynamic_none:
-@@ -7526,6 +7553,7 @@ static void __sched_dynamic_update(int m
+@@ -7562,6 +7589,7 @@ static void __sched_dynamic_update(int m
  		preempt_dynamic_disable(preempt_schedule_notrace);
  		preempt_dynamic_disable(irqentry_exit_cond_resched);
  		preempt_dynamic_key_disable(preempt_lazy);
@@ -180,7 +180,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		if (mode != preempt_dynamic_mode)
  			pr_info("Dynamic Preempt: none\n");
  		break;
-@@ -7538,6 +7566,7 @@ static void __sched_dynamic_update(int m
+@@ -7574,6 +7602,7 @@ static void __sched_dynamic_update(int m
  		preempt_dynamic_disable(preempt_schedule_notrace);
  		preempt_dynamic_disable(irqentry_exit_cond_resched);
  		preempt_dynamic_key_disable(preempt_lazy);
@@ -188,7 +188,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		if (mode != preempt_dynamic_mode)
  			pr_info("Dynamic Preempt: voluntary\n");
  		break;
-@@ -7550,6 +7579,7 @@ static void __sched_dynamic_update(int m
+@@ -7586,6 +7615,7 @@ static void __sched_dynamic_update(int m
  		preempt_dynamic_enable(preempt_schedule_notrace);
  		preempt_dynamic_enable(irqentry_exit_cond_resched);
  		preempt_dynamic_key_disable(preempt_lazy);
@@ -196,7 +196,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		if (mode != preempt_dynamic_mode)
  			pr_info("Dynamic Preempt: full\n");
  		break;
-@@ -7562,9 +7592,23 @@ static void __sched_dynamic_update(int m
+@@ -7598,9 +7628,23 @@ static void __sched_dynamic_update(int m
  		preempt_dynamic_enable(preempt_schedule_notrace);
  		preempt_dynamic_enable(irqentry_exit_cond_resched);
  		preempt_dynamic_key_enable(preempt_lazy);
@@ -220,7 +220,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	}
  
  	preempt_dynamic_mode = mode;
-@@ -7629,6 +7673,8 @@ static void __init preempt_dynamic_init(
+@@ -7665,6 +7709,8 @@ static void __init preempt_dynamic_init(
  			sched_dynamic_update(preempt_dynamic_voluntary);
  		} else if (IS_ENABLED(CONFIG_PREEMPT_LAZY)) {
  			sched_dynamic_update(preempt_dynamic_lazy);
@@ -229,7 +229,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		} else {
  			/* Default static call setting, nothing to do */
  			WARN_ON_ONCE(!IS_ENABLED(CONFIG_PREEMPT));
-@@ -7650,6 +7696,7 @@ PREEMPT_MODEL_ACCESSOR(none);
+@@ -7686,6 +7732,7 @@ PREEMPT_MODEL_ACCESSOR(none);
  PREEMPT_MODEL_ACCESSOR(voluntary);
  PREEMPT_MODEL_ACCESSOR(full);
  PREEMPT_MODEL_ACCESSOR(lazy);

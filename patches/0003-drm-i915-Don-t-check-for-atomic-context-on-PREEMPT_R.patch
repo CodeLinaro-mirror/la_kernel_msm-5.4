@@ -20,7 +20,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
 
 --- a/drivers/gpu/drm/i915/i915_utils.h
 +++ b/drivers/gpu/drm/i915/i915_utils.h
-@@ -269,8 +269,13 @@ wait_remaining_ms_from_jiffies(unsigned
+@@ -245,8 +245,13 @@ wait_remaining_ms_from_jiffies(unsigned
  						   (Wmax))
  #define wait_for(COND, MS)		_wait_for((COND), (MS) * 1000, 10, 1000)
  

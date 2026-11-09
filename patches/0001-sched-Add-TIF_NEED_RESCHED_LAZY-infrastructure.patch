@@ -50,7 +50,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -2030,7 +2030,8 @@ static inline void set_tsk_need_resched(
+@@ -2032,7 +2032,8 @@ static inline void set_tsk_need_resched(
  
  static inline void clear_tsk_need_resched(struct task_struct *tsk)
  {
@@ -111,7 +111,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  					   const void * const stackend,
 --- a/kernel/entry/common.c
 +++ b/kernel/entry/common.c
-@@ -101,7 +101,7 @@ void __weak arch_do_signal_or_restart(st
+@@ -101,7 +101,7 @@ __always_inline unsigned long exit_to_us
  
  		local_irq_enable_exit_to_user(ti_work);
  
@@ -142,7 +142,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -944,10 +944,9 @@ static inline void hrtick_rq_init(struct
+@@ -955,10 +955,9 @@ static inline void hrtick_rq_init(struct
   * this avoids any races wrt polling state changes and thereby avoids
   * spurious IPIs.
   */
@@ -155,7 +155,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  }
  
  /*
-@@ -972,9 +971,9 @@ static bool set_nr_if_polling(struct tas
+@@ -983,9 +982,9 @@ static bool set_nr_if_polling(struct tas
  }
  
  #else
@@ -167,7 +167,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  	return true;
  }
  
-@@ -1080,28 +1079,37 @@ void wake_up_q(struct wake_q_head *head)
+@@ -1091,28 +1090,37 @@ void wake_up_q(struct wake_q_head *head)
   * might also involve a cross-CPU call to trigger the scheduler on
   * the target CPU.
   */
@@ -212,7 +212,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  }
  
  void resched_cpu(int cpu)
-@@ -1196,7 +1204,7 @@ static void wake_up_idle_cpu(int cpu)
+@@ -1207,7 +1215,7 @@ static void wake_up_idle_cpu(int cpu)
  	 * and testing of the above solutions didn't appear to report
  	 * much benefits.
  	 */
