@@ -305,7 +305,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		clear_buddies(cfs_rq, curr);
  	}
  }
-@@ -5733,7 +5733,7 @@ entity_tick(struct cfs_rq *cfs_rq, struc
+@@ -5736,7 +5736,7 @@ entity_tick(struct cfs_rq *cfs_rq, struc
  	 * validating it and just reschedule.
  	 */
  	if (queued) {
@@ -314,7 +314,7 @@ Signed-off-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  		return;
  	}
  	/*
-@@ -8947,7 +8947,7 @@ static void check_preempt_wakeup_fair(st
+@@ -8950,7 +8950,7 @@ static void check_preempt_wakeup_fair(st
  	return;
  
  preempt:
